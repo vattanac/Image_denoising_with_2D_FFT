@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT · Frequency Domain Denoising</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700&display=swap');
+
+  :root {
+    --bg: #080c10;
+    --panel: #0d1520;
+    --border: #1a3045;
+    --glow: #00ffc8;
+    --glow2: #00aaff;
+    --warn: #ff6b35;
+    --noise-color: #ff4466;
+    --signal-color: #00ffc8;
+    --dim: #3a5a70;
+    --text: #8ec8e8;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Share Tech Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: 
+      repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,200,0.015) 2px, rgba(0,255,200,0.015) 4px),
+      repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(0,255,200,0.008) 2px, rgba(0,255,200,0.008) 4px);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .header {
+    text-align: center;
+    padding: 36px 20px 20px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .header h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(18px, 3vw, 32px);
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    color: #fff;
+    text-shadow: 0 0 20px var(--glow), 0 0 40px var(--glow2);
+  }
+
+  .header p {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 0.1em;
+    max-width: 700px;
+    margin-inline: auto;
+    line-height: 1.7;
+  }
+
+  .pipeline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 30px 20px 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .canvas-wrap {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 0 20px rgba(0,255,200,0.05), inset 0 0 30px rgba(0,0,0,0.5);
+  }
+
+  .canvas-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+  }
+
+  .stage-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .stage-label .num {
+    font-size: 18px;
+    font-weight: 700;
+    display: block;
+    color: var(--glow);
+    text-shadow: 0 0 10px var(--glow);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 6px;
+    gap: 3px;
+    margin-top: -30px;
+  }
+
+  .arrow-label {
+    font-size: 8px;
+    color: var(--dim);
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    text-align: center;
+  }
+
+  .arrow-line {
+    width: 36px;
+    height: 2px;
+    background: linear-gradient(90deg, var(--glow2), var(--glow));
+    position: relative;
+    box-shadow: 0 0 6px var(--glow2);
+  }
+
+  .arrow-line::after {
+    content: '';
+    position: absolute;
+    right: -6px;
+    top: -4px;
+    border-left: 8px solid var(--glow);
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    filter: drop-shadow(0 0 4px var(--glow));
+  }
+
+  /* Annotations overlaid on canvas */
+  .badge {
+    position: absolute;
+    font-size: 8px;
+    letter-spacing: 0.06em;
+    padding: 3px 7px;
+    border-radius: 2px;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .badge-noise {
+    background: rgba(255,68,102,0.85);
+    color: #fff;
+    bottom: 6px;
+    right: 6px;
+  }
+
+  .badge-signal {
+    background: rgba(0,255,200,0.85);
+    color: #000;
+    bottom: 6px;
+    right: 6px;
+  }
+
+  .badge-clean {
+    background: rgba(0,170,255,0.85);
+    color: #fff;
+    bottom: 6px;
+    right: 6px;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 30px;
+    flex-wrap: wrap;
+    padding: 24px 20px 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ctrl-label {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 160px;
+    height: 4px;
+    background: linear-gradient(90deg, var(--glow) var(--pct, 50%), var(--border) var(--pct, 50%));
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--glow);
+    box-shadow: 0 0 8px var(--glow);
+    cursor: pointer;
+  }
+
+  .ctrl-val {
+    font-size: 13px;
+    color: var(--glow);
+    text-shadow: 0 0 8px var(--glow);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  .btn {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    padding: 8px 20px;
+    background: transparent;
+    border: 1px solid var(--glow);
+    color: var(--glow);
+    cursor: pointer;
+    border-radius: 2px;
+    text-transform: uppercase;
+    transition: all 0.2s;
+    box-shadow: 0 0 10px rgba(0,255,200,0.1);
+  }
+
+  .btn:hover {
+    background: rgba(0,255,200,0.1);
+    box-shadow: 0 0 20px rgba(0,255,200,0.3);
+  }
+
+  /* Explanation panel */
+  .explain {
+    max-width: 900px;
+    margin: 30px auto;
+    padding: 0 20px 40px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .explain-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .explain-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--glow2), var(--glow));
+  }
+
+  .explain-card h3 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--glow);
+    margin-bottom: 10px;
+    text-shadow: 0 0 6px var(--glow);
+  }
+
+  .explain-card p {
+    font-size: 11px;
+    line-height: 1.8;
+    color: #6a9ab8;
+  }
+
+  .explain-card p strong {
+    color: var(--text);
+  }
+
+  /* Spectrum bar viz */
+  .spectrum-viz {
+    max-width: 900px;
+    margin: 0 auto 16px;
+    padding: 0 20px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .spectrum-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+    margin-bottom: 8px;
+    text-align: center;
+  }
+
+  #spectrumCanvas {
+    width: 100%;
+    height: 80px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #060a0f;
+  }
+
+  .freq-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 0.05em;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .live-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--glow);
+    box-shadow: 0 0 6px var(--glow);
+    animation: pulse 1.5s ease-in-out infinite;
+    margin-right: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>FFT · IMAGE DENOISING IN FREQUENCY DOMAIN</h1>
+  <p>
+    In pixel space, noise and signal are <strong style="color:#ff6b6b">indistinguishable</strong> — every pixel is a mix of both.
+    Transform to frequency space: <strong style="color:var(--glow)">signal lives at low frequencies</strong>, noise scatters to high.
+    A single filter does what a million pixel comparisons cannot.
+  </p>
+</div>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-label">NOISE LEVEL</span>
+    <input type="range" id="noiseSlider" min="5" max="80" value="40">
+    <span class="ctrl-val" id="noiseVal">40</span>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-label">FILTER RADIUS</span>
+    <input type="range" id="filterSlider" min="4" max="55" value="20">
+    <span class="ctrl-val" id="filterVal">20</span>
+  </div>
+  <button class="btn" id="regenBtn">⟳ NEW IMAGE</button>
+</div>
+
+<div class="pipeline" id="pipeline">
+  <!-- Stages injected by JS -->
+</div>
+
+<div class="spectrum-viz">
+  <div class="spectrum-title"><span class="live-dot"></span>1D RADIAL FREQUENCY SPECTRUM — LOW FREQ (CENTER) → HIGH FREQ (EDGE)</div>
+  <canvas id="spectrumCanvas" height="80"></canvas>
+  <div class="freq-labels">
+    <span>DC / 0Hz</span>
+    <span>── SIGNAL BAND ──</span>
+    <span>── NOISE BAND ──</span>
+    <span>Nyquist</span>
+  </div>
+</div>
+
+<div class="explain">
+  <div class="explain-card">
+    <h3>01 · WHY PIXEL SPACE FAILS</h3>
+    <p>
+      A noisy pixel and a real edge pixel can have <strong>identical values</strong>. There's no way to tell them apart locally.
+      Blurring removes noise but also destroys sharp edges — you can't distinguish the two.
+    </p>
+  </div>
+  <div class="explain-card">
+    <h3>02 · THE FFT TRANSFORM</h3>
+    <p>
+      The 2D FFT decomposes the image into a sum of <strong>sinusoidal waves at every frequency</strong>.
+      Each point in the spectrum encodes the amplitude and phase of one frequency component.
+    </p>
+  </div>
+  <div class="explain-card">
+    <h3>03 · FREQUENCY SEPARATION</h3>
+    <p>
+      Smooth gradients and shapes → <strong>low frequencies (center)</strong>.
+      Random noise → <strong>high frequencies (outer ring)</strong>.
+      They occupy completely different regions — now separable!
+    </p>
+  </div>
+  <div class="explain-card">
+    <h3>04 · INVERSE FFT</h3>
+    <p>
+      Zero out the high-frequency noise ring. Apply <strong>Inverse FFT</strong> to reconstruct only from
+      the preserved frequencies. The result: clean image, sharp edges intact.
+    </p>
+  </div>
+</div>
+
+<script>
+const SIZE = 128;
+
+// ── FFT Core ──────────────────────────────────────────────────────────────────
+function fft1d(re, im, invert) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (invert ? 2 : -2) * Math.PI / len;
+    const wCosBase = Math.cos(ang), wSinBase = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let wCos = 1, wSin = 0;
+      for (let k = 0; k < len >> 1; k++) {
+        const uR = re[i+k], uI = im[i+k];
+        const vR = re[i+k+(len>>1)]*wCos - im[i+k+(len>>1)]*wSin;
+        const vI = re[i+k+(len>>1)]*wSin + im[i+k+(len>>1)]*wCos;
+        re[i+k] = uR+vR; im[i+k] = uI+vI;
+        re[i+k+(len>>1)] = uR-vR; im[i+k+(len>>1)] = uI-vI;
+        const nc = wCos*wCosBase - wSin*wSinBase;
+        wSin = wCos*wSinBase + wSin*wCosBase;
+        wCos = nc;
+      }
+    }
+  }
+  if (invert) { for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; } }
+}
+
+function fft2d(re, im, N, invert) {
+  const row_r = new Float64Array(N), row_i = new Float64Array(N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) { row_r[x] = re[y*N+x]; row_i[x] = im[y*N+x]; }
+    fft1d(row_r, row_i, invert);
+    for (let x = 0; x < N; x++) { re[y*N+x] = row_r[x]; im[y*N+x] = row_i[x]; }
+  }
+  const col_r = new Float64Array(N), col_i = new Float64Array(N);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) { col_r[y] = re[y*N+x]; col_i[y] = im[y*N+x]; }
+    fft1d(col_r, col_i, invert);
+    for (let y = 0; y < N; y++) { re[y*N+x] = col_r[y]; im[y*N+x] = col_i[y]; }
+  }
+}
+
+function fftShift(data, N) {
+  const h = N>>1, out = new Float64Array(N*N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++)
+    out[((y+h)%N)*N + (x+h)%N] = data[y*N+x];
+  return out;
+}
+
+// ── Image Generation ──────────────────────────────────────────────────────────
+let seed = 42;
+function rand() { seed = (seed * 1664525 + 1013904223) & 0xffffffff; return (seed>>>0) / 0xffffffff; }
+function randN() { return Math.sqrt(-2*Math.log(rand()+1e-10)) * Math.cos(2*Math.PI*rand()); }
+
+function generateCleanImage(N) {
+  seed = Date.now() & 0xfffff;
+  const img = new Float64Array(N*N);
+  const cx = N/2, cy = N/2;
+
+  // Base gradient
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = x-cx, dy = y-cy;
+    const r = Math.sqrt(dx*dx+dy*dy);
+    img[y*N+x] = Math.max(0, 1 - r/(N*0.6));
+  }
+
+  // Add a few geometric shapes
+  const shapes = [
+    { type: 'rect', x: 20+rand()*20, y: 20+rand()*20, w: 20+rand()*20, h: 15+rand()*15, v: 0.7+rand()*0.3 },
+    { type: 'rect', x: 70+rand()*20, y: 60+rand()*20, w: 18+rand()*15, h: 20+rand()*15, v: 0.6+rand()*0.4 },
+    { type: 'circle', cx: 30+rand()*40, cy: 70+rand()*30, r: 10+rand()*15, v: 0.8+rand()*0.2 },
+    { type: 'circle', cx: 80+rand()*30, cy: 30+rand()*30, r: 8+rand()*12, v: 0.7+rand()*0.3 },
+  ];
+
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    for (const s of shapes) {
+      if (s.type === 'rect' && x>=s.x && x<s.x+s.w && y>=s.y && y<s.y+s.h)
+        img[y*N+x] = Math.min(1, img[y*N+x] + s.v * 0.4);
+      if (s.type === 'circle') {
+        const dd = Math.sqrt((x-s.cx)**2+(y-s.cy)**2);
+        if (dd < s.r) img[y*N+x] = Math.min(1, img[y*N+x] + s.v * (1-dd/s.r) * 0.5);
+      }
+    }
+  }
+
+  // Add low-freq waves for texture
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++)
+    img[y*N+x] = Math.min(1, img[y*N+x] + 0.06*Math.sin(x/8)*Math.cos(y/10));
+
+  return img;
+}
+
+// ── Canvas rendering ──────────────────────────────────────────────────────────
+function drawGrayscale(canvas, data, N, colorize) {
+  canvas.width = canvas.height = N;
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(N, N);
+  for (let i = 0; i < N*N; i++) {
+    const v = Math.max(0, Math.min(255, data[i]*255));
+    if (colorize === 'noise') {
+      id.data[i*4]   = Math.min(255, v + (255-v)*0.15);
+      id.data[i*4+1] = v * 0.3;
+      id.data[i*4+2] = v * 0.3;
+    } else if (colorize === 'clean') {
+      id.data[i*4]   = v * 0.3;
+      id.data[i*4+1] = Math.min(255, v*0.8 + 20);
+      id.data[i*4+2] = Math.min(255, v);
+    } else {
+      id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = v;
+    }
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function drawSpectrum(canvas, mag, N) {
+  canvas.width = canvas.height = N;
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(N, N);
+  // Log scale
+  const maxVal = Math.max(...mag);
+  const logMax = Math.log(1 + maxVal);
+  for (let i = 0; i < N*N; i++) {
+    const v = Math.log(1 + mag[i]) / logMax;
+    const r = Math.min(255, v*3*255);
+    const g = Math.min(255, v*1.5*255);
+    const b = Math.min(255, Math.max(0, (v-0.5)*2*255));
+    id.data[i*4] = r; id.data[i*4+1] = g; id.data[i*4+2] = b;
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function drawFilteredSpectrum(canvas, mag, N, radius) {
+  canvas.width = canvas.height = N;
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(N, N);
+  const maxVal = Math.max(...mag);
+  const logMax = Math.log(1 + maxVal);
+  const cx = N/2, cy = N/2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const i = y*N+x;
+    const dist = Math.sqrt((x-cx)**2+(y-cy)**2);
+    const inCircle = dist <= radius;
+    const v = Math.log(1 + mag[i]) / logMax;
+    if (inCircle) {
+      id.data[i*4]   = Math.min(255, v*1.2*255);
+      id.data[i*4+1] = Math.min(255, v*2.5*255);
+      id.data[i*4+2] = Math.min(255, v*2*255);
+    } else {
+      id.data[i*4]   = Math.min(255, v*0.5*255);
+      id.data[i*4+1] = Math.min(255, v*0.2*255);
+      id.data[i*4+2] = Math.min(255, v*0.2*255);
+    }
+    id.data[i*4+3] = 255;
+  }
+
+  ctx.putImageData(id, 0, 0);
+  // Draw filter circle
+  ctx.strokeStyle = 'rgba(0,255,200,0.7)';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3,3]);
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI*2);
+  ctx.stroke();
+}
+
+// Draw the 1D radial spectrum bar chart
+function drawRadialSpectrum(canvas, mag, N, filterRadius) {
+  const W = canvas.clientWidth || canvas.offsetWidth || 860;
+  const H = 80;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#060a0f';
+  ctx.fillRect(0,0,W,H);
+
+  const maxR = N/2;
+  const bins = 120;
+  const profile = new Float64Array(bins);
+  const counts = new Float64Array(bins);
+  const cx = N/2, cy = N/2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const d = Math.sqrt((x-cx)**2+(y-cy)**2);
+    const b = Math.floor(d / maxR * bins);
+    if (b < bins) { profile[b] += mag[y*N+x]; counts[b]++; }
+  }
+  for (let i = 0; i < bins; i++) if (counts[i]) profile[i] /= counts[i];
+
+  const maxP = Math.max(...profile);
+
+  const bw = W / bins;
+  const filterBin = Math.floor(filterRadius / maxR * bins);
+
+  // Background shading: signal vs noise zone
+  const grad1 = ctx.createLinearGradient(0,0,filterBin*bw,0);
+  grad1.addColorStop(0, 'rgba(0,255,200,0.06)');
+  grad1.addColorStop(1, 'rgba(0,255,200,0.02)');
+  ctx.fillStyle = grad1;
+  ctx.fillRect(0, 0, filterBin*bw, H);
+
+  const grad2 = ctx.createLinearGradient(filterBin*bw,0,W,0);
+  grad2.addColorStop(0, 'rgba(255,68,102,0.02)');
+  grad2.addColorStop(1, 'rgba(255,68,102,0.08)');
+  ctx.fillStyle = grad2;
+  ctx.fillRect(filterBin*bw, 0, W - filterBin*bw, H);
+
+  // Bars
+  for (let i = 0; i < bins; i++) {
+    const bh = (profile[i] / (maxP||1)) * (H-16);
+    const inFilter = i < filterBin;
+    ctx.fillStyle = inFilter ? 'rgba(0,255,200,0.7)' : 'rgba(255,68,102,0.7)';
+    ctx.fillRect(i*bw, H-bh-8, bw-1, bh);
+  }
+
+  // Filter line
+  ctx.strokeStyle = 'rgba(0,255,200,0.9)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4,3]);
+  ctx.beginPath(); ctx.moveTo(filterBin*bw, 0); ctx.lineTo(filterBin*bw, H);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Labels
+  ctx.fillStyle = 'rgba(0,255,200,0.6)';
+  ctx.font = '8px Share Tech Mono';
+  ctx.fillText('PASS', filterBin*bw*0.3, 12);
+  ctx.fillStyle = 'rgba(255,68,102,0.6)';
+  ctx.fillText('REJECT', filterBin*bw + 6, 12);
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+const N = SIZE;
+let cleanImg, noisyImg, freRe, freIm, magShifted, filteredImg;
+
+function buildStages() {
+  const pipeline = document.getElementById('pipeline');
+  const CSIZE = 190;
+
+  const stages = [
+    { id: 'c0', label: '01', title: 'CLEAN IMAGE', badge: null, bclass: '' },
+    null, // arrow
+    { id: 'c1', label: '02', title: 'NOISY IMAGE', badge: '+ NOISE', bclass: 'badge-noise' },
+    null,
+    { id: 'c2', label: '03', title: 'FFT SPECTRUM', badge: 'FREQ DOMAIN', bclass: 'badge-signal' },
+    null,
+    { id: 'c3', label: '04', title: 'FILTERED SPECTRUM', badge: 'LOW-PASS', bclass: 'badge-signal' },
+    null,
+    { id: 'c4', label: '05', title: 'DENOISED', badge: 'IFFT', bclass: 'badge-clean' },
+  ];
+
+  pipeline.innerHTML = '';
+
+  for (const s of stages) {
+    if (!s) {
+      const arr = document.createElement('div');
+      arr.className = 'arrow';
+      arr.innerHTML = `<div class="arrow-label">→</div><div class="arrow-line"></div>`;
+      pipeline.appendChild(arr);
+    } else {
+      const div = document.createElement('div');
+      div.className = 'stage';
+      const wrap = document.createElement('div');
+      wrap.className = 'canvas-wrap';
+      wrap.style.width = wrap.style.height = CSIZE+'px';
+      const cv = document.createElement('canvas');
+      cv.id = s.id;
+      cv.style.width = cv.style.height = CSIZE+'px';
+      wrap.appendChild(cv);
+      if (s.badge) {
+        const b = document.createElement('div');
+        b.className = 'badge ' + s.bclass;
+        b.textContent = s.badge;
+        wrap.appendChild(b);
+      }
+      const lbl = document.createElement('div');
+      lbl.className = 'stage-label';
+      lbl.innerHTML = `<span class="num">${s.label}</span>${s.title}`;
+      div.appendChild(wrap);
+      div.appendChild(lbl);
+      pipeline.appendChild(div);
+    }
+  }
+}
+
+function process() {
+  const noiseLevel = +document.getElementById('noiseSlider').value / 100;
+  const filterRadius = +document.getElementById('filterSlider').value;
+
+  // 1) Noisy image
+  noisyImg = new Float64Array(cleanImg);
+  for (let i = 0; i < N*N; i++) noisyImg[i] = Math.max(0, Math.min(1, cleanImg[i] + noiseLevel * randN()));
+
+  // 2) FFT
+  freRe = new Float64Array(noisyImg);
+  freIm = new Float64Array(N*N);
+  fft2d(freRe, freIm, N, false);
+
+  // Magnitude (shifted)
+  const mag = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) mag[i] = Math.sqrt(freRe[i]**2 + freIm[i]**2);
+  magShifted = fftShift(mag, N);
+  const reShifted = fftShift(freRe, N);
+  const imShifted = fftShift(freIm, N);
+
+  // 3) Low-pass filter on shifted
+  const filtReS = new Float64Array(reShifted);
+  const filtImS = new Float64Array(imShifted);
+  const cx = N/2, cy = N/2;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const d = Math.sqrt((x-cx)**2+(y-cy)**2);
+    if (d > filterRadius) { filtReS[y*N+x] = 0; filtImS[y*N+x] = 0; }
+  }
+
+  // Unshift, IFFT
+  const filtRe = fftShift(filtReS, N); // double shift = unshift for even N
+  const filtIm = fftShift(filtImS, N);
+  fft2d(filtRe, filtIm, N, true);
+  filteredImg = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) filteredImg[i] = Math.max(0, Math.min(1, filtRe[i]));
+
+  // Draw
+  drawGrayscale(document.getElementById('c0'), cleanImg, N, null);
+  drawGrayscale(document.getElementById('c1'), noisyImg, N, 'noise');
+  drawSpectrum(document.getElementById('c2'), magShifted, N);
+  drawFilteredSpectrum(document.getElementById('c3'), magShifted, N, filterRadius);
+  drawGrayscale(document.getElementById('c4'), filteredImg, N, 'clean');
+
+  // Radial spectrum
+  const sc = document.getElementById('spectrumCanvas');
+  drawRadialSpectrum(sc, magShifted, N, filterRadius);
+}
+
+function regenerate() {
+  cleanImg = generateCleanImage(N);
+  process();
+}
+
+// Sliders
+function updateSlider(el) {
+  const min = +el.min, max = +el.max, val = +el.value;
+  el.style.setProperty('--pct', ((val-min)/(max-min)*100)+'%');
+}
+
+document.getElementById('noiseSlider').addEventListener('input', function() {
+  document.getElementById('noiseVal').textContent = this.value;
+  updateSlider(this);
+  seed = 12345;
+  process();
+});
+
+document.getElementById('filterSlider').addEventListener('input', function() {
+  document.getElementById('filterVal').textContent = this.value;
+  updateSlider(this);
+  process();
+});
+
+document.getElementById('regenBtn').addEventListener('click', regenerate);
+
+buildStages();
+updateSlider(document.getElementById('noiseSlider'));
+updateSlider(document.getElementById('filterSlider'));
+regenerate();
+
+window.addEventListener('resize', () => {
+  const sc = document.getElementById('spectrumCanvas');
+  if (magShifted) {
+    const filterRadius = +document.getElementById('filterSlider').value;
+    drawRadialSpectrum(sc, magShifted, N, filterRadius);
+  }
+});
+</script>
+</body>
+</html>

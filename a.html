@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Image Sharpening — High-Pass Filter</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #070b14;
+    --panel: #0d1525;
+    --border: #1a2a45;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #7fff6b;
+    --text: #c8d8f0;
+    --muted: #4a6080;
+    --glow: rgba(0,212,255,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* HEADER */
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: 4px 12px;
+    margin-bottom: 16px;
+    animation: pulse-border 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(0,212,255,0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(0,212,255,0); }
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(22px, 4vw, 42px);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .subtitle {
+    margin-top: 10px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+
+  /* CONTROLS */
+  .controls-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 36px;
+    padding: 20px 28px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .ctrl-label {
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 160px;
+    height: 4px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    cursor: pointer;
+  }
+
+  .val-display {
+    font-size: 13px;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 8px 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn:hover {
+    background: var(--accent);
+    color: var(--bg);
+    box-shadow: 0 0 20px rgba(0,212,255,0.4);
+  }
+
+  .btn.active {
+    background: var(--accent);
+    color: var(--bg);
+  }
+
+  /* PIPELINE */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    align-items: start;
+    margin-bottom: 36px;
+  }
+
+  @media (max-width: 900px) {
+    .pipeline { grid-template-columns: 1fr 1fr; }
+    .arrow-cell { display: none; }
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .stage-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-align: center;
+    padding-bottom: 4px;
+  }
+
+  .stage-title.c-cyan { color: var(--accent); border-bottom: 1px solid var(--accent); }
+  .stage-title.c-orange { color: var(--accent2); border-bottom: 1px solid var(--accent2); }
+  .stage-title.c-green { color: var(--accent3); border-bottom: 1px solid var(--accent3); }
+
+  .canvas-wrap {
+    position: relative;
+    border: 1px solid var(--border);
+    background: #000;
+    transition: box-shadow 0.3s;
+  }
+
+  .canvas-wrap:hover { box-shadow: 0 0 20px var(--glow); }
+
+  canvas { display: block; }
+
+  .stage-desc {
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .arrow-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-top: 80px;
+  }
+
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  .arrow-line {
+    width: 100%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    position: relative;
+  }
+
+  .arrow-line::after {
+    content: '▶';
+    position: absolute;
+    right: -6px;
+    top: -7px;
+    font-size: 9px;
+    color: var(--accent);
+  }
+
+  /* FORMULA */
+  .formula-bar {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    padding: 20px 28px;
+    margin-bottom: 36px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .formula {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(13px, 2vw, 18px);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .f-orig { color: var(--accent); }
+  .f-op { color: var(--muted); }
+  .f-hp { color: var(--accent2); }
+  .f-sharp { color: var(--accent3); }
+  .f-alpha { color: #ffcc44; }
+
+  .formula-note {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    line-height: 1.7;
+  }
+
+  /* FFT SPECTRUM INFO */
+  .spectrum-info {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 36px;
+  }
+
+  @media (max-width: 700px) {
+    .spectrum-info { grid-template-columns: 1fr; }
+  }
+
+  .info-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 18px 20px;
+  }
+
+  .info-card h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+
+  .info-card p {
+    font-size: 10px;
+    line-height: 1.8;
+    color: var(--muted);
+  }
+
+  /* FOOTER */
+  footer {
+    text-align: center;
+    padding: 24px 0;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--muted);
+    text-transform: uppercase;
+    border-top: 1px solid var(--border);
+  }
+
+  /* Loading */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(7,11,20,0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    z-index: 10;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .spinner {
+    width: 14px; height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin-right: 8px;
+  }
+
+  /* Animate in */
+  .stage { animation: fadeUp 0.5s ease both; }
+  .stage:nth-child(1) { animation-delay: 0.05s; }
+  .stage:nth-child(2) { animation-delay: 0.1s; }
+  .stage:nth-child(3) { animation-delay: 0.15s; }
+  .stage:nth-child(4) { animation-delay: 0.2s; }
+  .stage:nth-child(5) { animation-delay: 0.25s; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="badge">Signal Processing · Computer Vision · FFT</div>
+    <h1>Image Sharpening via<br><span>High-Pass Filter in Frequency Domain</span></h1>
+    <p class="subtitle">2D Fast Fourier Transform · Frequency Filtering · Spatial Reconstruction</p>
+  </header>
+
+  <!-- CONTROLS -->
+  <div class="controls-bar">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Alpha (α)</span>
+      <input type="range" id="alphaSlider" min="0" max="4" step="0.05" value="1.5">
+      <span class="val-display" id="alphaVal">1.50</span>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Filter Radius</span>
+      <input type="range" id="radiusSlider" min="2" max="60" step="1" value="15">
+      <span class="val-display" id="radiusVal">15</span>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Scene</span>
+      <button class="btn active" id="btn-geometric" onclick="setScene('geometric')">Geometric</button>
+      <button class="btn" id="btn-gradient" onclick="setScene('gradient')">Gradient</button>
+      <button class="btn" id="btn-text" onclick="setScene('text')">Text</button>
+    </div>
+    <button class="btn" id="btnProcess" onclick="runPipeline()">▶ Process</button>
+  </div>
+
+  <!-- FORMULA -->
+  <div class="formula-bar">
+    <div>
+      <div style="font-size:10px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Sharpening Formula</div>
+      <div class="formula">
+        <span class="f-sharp">Sharpened</span>
+        <span class="f-op"> = </span>
+        <span class="f-orig">Original</span>
+        <span class="f-op"> + </span>
+        <span class="f-alpha">α</span>
+        <span class="f-op"> × </span>
+        <span class="f-hp">HighPass(Original)</span>
+      </div>
+    </div>
+    <div class="formula-note">
+      <strong style="color:var(--text)">Low Pass:</strong> LPF(F) = F × Gaussian(σ) in freq domain<br>
+      <strong style="color:var(--text)">High Pass:</strong> HPF = F − LPF(F) (isolates edges)<br>
+      <strong style="color:var(--text)">Result:</strong> F + α·HPF amplifies edge contrast
+    </div>
+  </div>
+
+  <!-- PIPELINE -->
+  <div class="pipeline">
+    <div class="stage">
+      <div class="stage-title c-cyan" style="width:100%;text-align:center">① Original</div>
+      <div class="canvas-wrap" id="wrap0">
+        <canvas id="c0" width="220" height="220"></canvas>
+        <div class="loading-overlay" id="load0"><div class="spinner"></div>Rendering…</div>
+      </div>
+      <div class="stage-desc">Synthetic test image<br>f(x,y) — spatial domain</div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-title c-orange" style="width:100%;text-align:center">② FFT Spectrum</div>
+      <div class="canvas-wrap" id="wrap1">
+        <canvas id="c1" width="220" height="220"></canvas>
+        <div class="loading-overlay" id="load1"><div class="spinner"></div>Computing…</div>
+      </div>
+      <div class="stage-desc">|F(u,v)| magnitude<br>log scale · DC centered</div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-title c-orange" style="width:100%;text-align:center">③ HPF Mask</div>
+      <div class="canvas-wrap" id="wrap2">
+        <canvas id="c2" width="220" height="220"></canvas>
+        <div class="loading-overlay" id="load2"><div class="spinner"></div>Filtering…</div>
+      </div>
+      <div class="stage-desc">High-pass mask applied<br>Low freqs suppressed</div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-title c-orange" style="width:100%;text-align:center">④ High-Freq Components</div>
+      <div class="canvas-wrap" id="wrap3">
+        <canvas id="c3" width="220" height="220"></canvas>
+        <div class="loading-overlay" id="load3"><div class="spinner"></div>Inverting…</div>
+      </div>
+      <div class="stage-desc">IFFT of HPF result<br>Edges &amp; fine details</div>
+    </div>
+
+    <div class="stage">
+      <div class="stage-title c-green" style="width:100%;text-align:center">⑤ Sharpened (α=<span id="alphaLabel">1.5</span>)</div>
+      <div class="canvas-wrap" id="wrap4">
+        <canvas id="c4" width="220" height="220"></canvas>
+        <div class="loading-overlay" id="load4"><div class="spinner"></div>Synthesizing…</div>
+      </div>
+      <div class="stage-desc">Original + α·HighFreq<br>Enhanced edge contrast</div>
+    </div>
+  </div>
+
+  <!-- INFO CARDS -->
+  <div class="spectrum-info">
+    <div class="info-card">
+      <h3>Why Frequency Domain?</h3>
+      <p>The 2D FFT decomposes an image into sinusoidal basis functions at different frequencies. Low frequencies encode smooth regions and global structure. High frequencies encode sharp transitions — edges, fine textures, and detail. Filtering is simply multiplication in frequency space.</p>
+    </div>
+    <div class="info-card">
+      <h3>High-Pass Filter Mechanics</h3>
+      <p>A Gaussian low-pass filter H_LP(u,v) = exp(−D²/2σ²) is applied in frequency domain. The high-pass complement is H_HP = 1 − H_LP. Multiplying the spectrum by H_HP zeros out low frequencies and preserves edges near discontinuities.</p>
+    </div>
+    <div class="info-card">
+      <h3>Sharpening Parameter α</h3>
+      <p>α controls how aggressively edges are amplified. α = 0 returns the original. α = 1.5 (default) gives natural enhancement. α &gt; 3 creates an over-sharpened "HDR" effect with visible ringing artifacts (Gibbs phenomenon) around sharp edges.</p>
+    </div>
+  </div>
+
+  <footer>Interactive FFT Image Processing Visualization · Built with Canvas 2D API · 2D DFT via Row-Column Decomposition</footer>
+</div>
+
+<script>
+// ─── FFT (Cooley-Tukey, power-of-2) ────────────────────────────────────────
+function fft(re, im) {
+  const n = re.length;
+  if (n <= 1) return;
+  // Bit-reversal permutation
+  let j = 0;
+  for (let i = 1; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wRe = Math.cos(ang), wIm = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let curRe = 1, curIm = 0;
+      for (let k = 0; k < len / 2; k++) {
+        const uRe = re[i+k],   uIm = im[i+k];
+        const vRe = re[i+k+len/2]*curRe - im[i+k+len/2]*curIm;
+        const vIm = re[i+k+len/2]*curIm + im[i+k+len/2]*curRe;
+        re[i+k]       = uRe + vRe; im[i+k]       = uIm + vIm;
+        re[i+k+len/2] = uRe - vRe; im[i+k+len/2] = uIm - vIm;
+        const newRe = curRe*wRe - curIm*wIm;
+        curIm = curRe*wIm + curIm*wRe; curRe = newRe;
+      }
+    }
+  }
+}
+
+function ifft(re, im) {
+  // Conjugate, fft, conjugate, divide
+  for (let i = 0; i < re.length; i++) im[i] = -im[i];
+  fft(re, im);
+  for (let i = 0; i < re.length; i++) { re[i] /= re.length; im[i] = -im[i] / re.length; }
+}
+
+// 2D FFT via row-column decomposition
+function fft2d(re2, im2, N) {
+  // Rows
+  for (let r = 0; r < N; r++) {
+    const row_re = re2.slice(r*N, r*N+N);
+    const row_im = im2.slice(r*N, r*N+N);
+    fft(row_re, row_im);
+    re2.set(row_re, r*N); im2.set(row_im, r*N);
+  }
+  // Cols
+  for (let c = 0; c < N; c++) {
+    const col_re = new Float64Array(N);
+    const col_im = new Float64Array(N);
+    for (let r = 0; r < N; r++) { col_re[r] = re2[r*N+c]; col_im[r] = im2[r*N+c]; }
+    fft(col_re, col_im);
+    for (let r = 0; r < N; r++) { re2[r*N+c] = col_re[r]; im2[r*N+c] = col_im[r]; }
+  }
+}
+
+function ifft2d(re2, im2, N) {
+  for (let r = 0; r < N; r++) {
+    const row_re = re2.slice(r*N, r*N+N);
+    const row_im = im2.slice(r*N, r*N+N);
+    ifft(row_re, row_im);
+    re2.set(row_re, r*N); im2.set(row_im, r*N);
+  }
+  for (let c = 0; c < N; c++) {
+    const col_re = new Float64Array(N);
+    const col_im = new Float64Array(N);
+    for (let r = 0; r < N; r++) { col_re[r] = re2[r*N+c]; col_im[r] = im2[r*N+c]; }
+    ifft(col_re, col_im);
+    for (let r = 0; r < N; r++) { re2[r*N+c] = col_re[r]; im2[r*N+c] = col_im[r]; }
+  }
+}
+
+// ─── Scene Generators ───────────────────────────────────────────────────────
+let currentScene = 'geometric';
+function setScene(name) {
+  currentScene = name;
+  document.querySelectorAll('.ctrl-group .btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('btn-' + name).classList.add('active');
+  runPipeline();
+}
+
+const N = 256; // Must be power of 2
+
+function generateScene(name) {
+  const offscreen = document.createElement('canvas');
+  offscreen.width = offscreen.height = N;
+  const ctx = offscreen.getContext('2d');
+
+  if (name === 'geometric') {
+    // Dark gradient background
+    const bg = ctx.createLinearGradient(0, 0, N, N);
+    bg.addColorStop(0, '#0d1525'); bg.addColorStop(1, '#050a10');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, N, N);
+
+    // Diagonal line
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(N,N); ctx.stroke();
+
+    // Small dark square (top-left)
+    ctx.fillStyle = '#555'; ctx.fillRect(14, 14, 28, 24);
+
+    // Large rectangle
+    ctx.fillStyle = '#aaa'; ctx.fillRect(38, 28, 130, 80);
+
+    // Circle
+    ctx.fillStyle = '#ddd';
+    ctx.beginPath(); ctx.arc(100, 176, 52, 0, Math.PI*2); ctx.fill();
+
+    // Stripes
+    ctx.strokeStyle = '#ccc'; ctx.lineWidth = 3;
+    for (let i = 0; i < 5; i++) {
+      const y = 158 + i*11;
+      ctx.beginPath(); ctx.moveTo(168, y); ctx.lineTo(220, y); ctx.stroke();
+    }
+
+  } else if (name === 'gradient') {
+    const bg = ctx.createRadialGradient(N/2,N/2,0, N/2,N/2,N*0.7);
+    bg.addColorStop(0,'#3a3a5c'); bg.addColorStop(1,'#070b14');
+    ctx.fillStyle=bg; ctx.fillRect(0,0,N,N);
+
+    // Concentric rings
+    for (let r = 10; r < 100; r+=14) {
+      ctx.strokeStyle = `rgba(200,220,255,${0.6-r/200})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(N/2, N/2, r, 0, Math.PI*2); ctx.stroke();
+    }
+
+    // Checkerboard patch
+    for (let i = 0; i < 6; i++) for (let j = 0; j < 6; j++) {
+      ctx.fillStyle = (i+j)%2 ? '#aaa' : '#222';
+      ctx.fillRect(160+i*12, 40+j*12, 12, 12);
+    }
+
+    // Triangle
+    ctx.fillStyle = '#bbb';
+    ctx.beginPath(); ctx.moveTo(50,200); ctx.lineTo(110,200); ctx.lineTo(80,140); ctx.closePath(); ctx.fill();
+
+  } else { // text
+    ctx.fillStyle = '#060c18'; ctx.fillRect(0,0,N,N);
+    ctx.fillStyle = '#eee';
+    ctx.font = 'bold 36px serif'; ctx.fillText('FFT', 40, 80);
+    ctx.font = '14px monospace'; ctx.fillText('Sharpening', 44, 110);
+    ctx.font = 'bold 22px serif'; ctx.fillText('HighPass', 40, 150);
+    ctx.font = '11px monospace'; ctx.fillText('f(x,y) → F(u,v)', 30, 180);
+
+    // Horizontal bar
+    ctx.fillStyle = '#888'; ctx.fillRect(20, 195, 210, 3);
+    ctx.fillStyle = '#555'; ctx.fillRect(20, 204, 210, 2);
+    ctx.fillStyle = '#333'; ctx.fillRect(20, 211, 210, 1);
+  }
+
+  // Extract grayscale
+  const imgData = ctx.getImageData(0,0,N,N);
+  const gray = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) {
+    gray[i] = (imgData.data[i*4]*0.299 + imgData.data[i*4+1]*0.587 + imgData.data[i*4+2]*0.114) / 255;
+  }
+  return gray;
+}
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+function fftshift(arr, N) {
+  const out = new Float64Array(N*N);
+  const h = N/2;
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      out[((r+h)%N)*N + (c+h)%N] = arr[r*N+c];
+  return out;
+}
+
+function showLoading(id, on) {
+  document.getElementById('load'+id).style.display = on ? 'flex' : 'none';
+}
+
+function drawGray(canvasId, gray, N, normalize=true) {
+  const cvs = document.getElementById(canvasId);
+  const ctx = cvs.getContext('2d');
+  const imgData = ctx.createImageData(N, N);
+  let mn = Infinity, mx = -Infinity;
+  if (normalize) {
+    for (let i = 0; i < N*N; i++) { mn = Math.min(mn, gray[i]); mx = Math.max(mx, gray[i]); }
+  } else { mn = 0; mx = 1; }
+  const range = mx - mn || 1;
+  for (let i = 0; i < N*N; i++) {
+    const v = Math.min(255, Math.max(0, Math.round((gray[i]-mn)/range*255)));
+    imgData.data[i*4]=v; imgData.data[i*4+1]=v; imgData.data[i*4+2]=v; imgData.data[i*4+3]=255;
+  }
+  // Scale to canvas size
+  const tmp = document.createElement('canvas');
+  tmp.width = tmp.height = N;
+  tmp.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.drawImage(tmp, 0, 0, cvs.width, cvs.height);
+}
+
+function drawSpectrum(canvasId, re, im, N) {
+  const mag = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) mag[i] = Math.log(1 + Math.sqrt(re[i]*re[i]+im[i]*im[i]));
+  const shifted = fftshift(mag, N);
+  drawGray(canvasId, shifted, N, true);
+}
+
+function drawFilteredSpectrum(canvasId, re, im, mask, N) {
+  const mag = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) {
+    const m = Math.sqrt(re[i]*re[i]+im[i]*im[i]) * mask[i];
+    mag[i] = Math.log(1 + m);
+  }
+  const shifted = fftshift(mag, N);
+  // Colorize: dark blue to cyan
+  const cvs = document.getElementById(canvasId);
+  const ctx = cvs.getContext('2d');
+  const tmp = document.createElement('canvas');
+  tmp.width = tmp.height = N;
+  const imgData = tmp.getContext('2d').createImageData(N, N);
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < N*N; i++) { mn = Math.min(mn, shifted[i]); mx = Math.max(mx, shifted[i]); }
+  const range = mx-mn||1;
+  for (let i = 0; i < N*N; i++) {
+    const t = (shifted[i]-mn)/range;
+    imgData.data[i*4]   = Math.round(t * 0);
+    imgData.data[i*4+1] = Math.round(t * 200);
+    imgData.data[i*4+2] = Math.round(t * 255);
+    imgData.data[i*4+3] = 255;
+  }
+  tmp.getContext('2d').putImageData(imgData, 0, 0);
+  ctx.drawImage(tmp, 0, 0, cvs.width, cvs.height);
+}
+
+function buildHPMask(N, radius) {
+  // Gaussian high-pass: 1 - exp(-D^2 / (2*sigma^2)) where sigma = radius
+  const mask = new Float64Array(N*N);
+  const cx = N/2, cy = N/2;
+  const s2 = 2*radius*radius;
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++) {
+      // unshifted coords — DC is at (0,0) so use wrapped distance
+      const u = r < N/2 ? r : r-N;
+      const v = c < N/2 ? c : c-N;
+      const d2 = u*u + v*v;
+      mask[r*N+c] = 1 - Math.exp(-d2/s2);
+    }
+  return mask;
+}
+
+// ─── Main Pipeline ───────────────────────────────────────────────────────────
+async function runPipeline() {
+  document.getElementById('alphaLabel').textContent = parseFloat(document.getElementById('alphaSlider').value).toFixed(2);
+  for (let i = 0; i < 5; i++) showLoading(i, true);
+
+  // Yield to browser for repaint
+  await new Promise(r => setTimeout(r, 30));
+
+  const alpha = parseFloat(document.getElementById('alphaSlider').value);
+  const radius = parseInt(document.getElementById('radiusSlider').value);
+
+  // 1. Generate original scene
+  const gray = generateScene(currentScene);
+  drawGray('c0', gray, N, false);
+  showLoading(0, false);
+
+  await new Promise(r => setTimeout(r, 20));
+
+  // 2. 2D FFT
+  const re = new Float64Array(gray);
+  const im = new Float64Array(N*N); // zero imaginary
+  fft2d(re, im, N);
+  drawSpectrum('c1', re, im, N);
+  showLoading(1, false);
+
+  await new Promise(r => setTimeout(r, 20));
+
+  // 3. Build HPF mask and show filtered spectrum
+  const mask = buildHPMask(N, radius);
+  drawFilteredSpectrum('c2', re, im, mask, N);
+  showLoading(2, false);
+
+  await new Promise(r => setTimeout(r, 20));
+
+  // 4. Apply mask and IFFT → high-frequency component
+  const hp_re = new Float64Array(N*N);
+  const hp_im = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) { hp_re[i] = re[i]*mask[i]; hp_im[i] = im[i]*mask[i]; }
+  ifft2d(hp_re, hp_im, N);
+  drawGray('c3', hp_re, N, true);
+  showLoading(3, false);
+
+  await new Promise(r => setTimeout(r, 20));
+
+  // 5. Sharpened = original + alpha * highfreq
+  const sharpened = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) sharpened[i] = gray[i] + alpha * hp_re[i];
+  drawGray('c4', sharpened, N, true);
+  showLoading(4, false);
+}
+
+// ─── Slider events ───────────────────────────────────────────────────────────
+document.getElementById('alphaSlider').addEventListener('input', function() {
+  document.getElementById('alphaVal').textContent = parseFloat(this.value).toFixed(2);
+  document.getElementById('alphaLabel').textContent = parseFloat(this.value).toFixed(2);
+});
+
+document.getElementById('alphaSlider').addEventListener('change', runPipeline);
+document.getElementById('radiusSlider').addEventListener('input', function() {
+  document.getElementById('radiusVal').textContent = this.value;
+});
+document.getElementById('radiusSlider').addEventListener('change', runPipeline);
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+window.addEventListener('load', runPipeline);
+</script>
+</body>
+</html>

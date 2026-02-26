@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Spectrum Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #08090d;
+    --surface: #0f1117;
+    --border: #1e2130;
+    --accent-low: #3b82f6;
+    --accent-high: #f59e0b;
+    --accent-noise: #ec4899;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.015) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.015) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 48px 24px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+
+  .tag {
+    display: inline-block;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+  }
+
+  h1 span {
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .subtitle {
+    margin-top: 14px;
+    color: var(--muted);
+    font-size: 15px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+  }
+
+  .tab {
+    font-family: 'Space Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 10px 22px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .tab::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .tab:hover { color: var(--text); border-color: #334155; }
+
+  .tab[data-type="low"].active  { color: var(--accent-low);  border-color: var(--accent-low);  background: rgba(59,130,246,.08); }
+  .tab[data-type="high"].active { color: var(--accent-high); border-color: var(--accent-high); background: rgba(245,158,11,.08); }
+  .tab[data-type="noise"].active{ color: var(--accent-noise);border-color: var(--accent-noise);background: rgba(236,72,153,.08);}
+
+  /* Main layout */
+  .scene {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 32px;
+  }
+
+  @media (max-width: 640px) { .scene { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .panel-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+
+  .panel-dot.low   { background: var(--accent-low); }
+  .panel-dot.high  { background: var(--accent-high); }
+  .panel-dot.noise { background: var(--accent-noise); }
+
+  canvas {
+    display: block;
+    width: 100%;
+  }
+
+  /* Explanation bar */
+  .info-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 28px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 20px;
+    align-items: center;
+    transition: border-color 0.4s;
+  }
+
+  .info-bar.low   { border-color: rgba(59,130,246,.4); }
+  .info-bar.high  { border-color: rgba(245,158,11,.4); }
+  .info-bar.noise { border-color: rgba(236,72,153,.4); }
+
+  .info-icon {
+    font-size: 2.4rem;
+    line-height: 1;
+  }
+
+  .info-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+
+  .info-title.low   { color: var(--accent-low); }
+  .info-title.high  { color: var(--accent-high); }
+  .info-title.noise { color: var(--accent-noise); }
+
+  .info-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.7;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    margin-top: 28px;
+    flex-wrap: wrap;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .legend-swatch {
+    width: 28px; height: 3px;
+    border-radius: 2px;
+  }
+
+  /* Frequency axis label */
+  .axis-labels {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 20px 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: #2d3748;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <header>
+    <div class="tag">Signal Processing</div>
+    <h1>Understanding <span>FFT Spectrum</span></h1>
+    <p class="subtitle">How spatial frequency content maps to the Fourier domain</p>
+  </header>
+
+  <div class="tabs">
+    <button class="tab active" data-type="low">🌤 Low Frequency</button>
+    <button class="tab" data-type="high">🔗 High Frequency</button>
+    <button class="tab" data-type="noise">⚡ Noise</button>
+  </div>
+
+  <div class="scene">
+    <!-- Spatial Domain -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot" id="dot-spatial"></div>
+        Spatial Domain — Image
+      </div>
+      <canvas id="spatial" width="480" height="260"></canvas>
+      <div class="axis-labels"><span>pixels →</span><span>image space</span></div>
+    </div>
+
+    <!-- FFT Spectrum -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot" id="dot-fft"></div>
+        Frequency Domain — FFT Spectrum
+      </div>
+      <canvas id="fft" width="480" height="260"></canvas>
+      <div class="axis-labels"><span>← low freq · center · high freq →</span></div>
+    </div>
+  </div>
+
+  <!-- Info Bar -->
+  <div class="info-bar low" id="info-bar">
+    <div class="info-icon" id="info-icon">🌤</div>
+    <div>
+      <div class="info-title low" id="info-title">Low Frequency — Blue Sky</div>
+      <div class="info-desc" id="info-desc">
+        Nearly uniform pixel values, almost no variation across the image.
+        All energy concentrates in a single bright spot at the <strong>center</strong> of the FFT spectrum (DC component = 0 Hz).
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#3b82f6"></div> Low (DC center)
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#f59e0b"></div> High (outer ring)
+    </div>
+    <div class="legend-item">
+      <div class="legend-swatch" style="background:#ec4899"></div> Noise (everywhere)
+    </div>
+  </div>
+</div>
+
+<script>
+const spatialCanvas = document.getElementById('spatial');
+const fftCanvas     = document.getElementById('fft');
+const sCtx = spatialCanvas.getContext('2d');
+const fCtx = fftCanvas.getContext('2d');
+
+let currentType = 'low';
+let animFrame;
+let t = 0;
+
+// ─── SPATIAL PAINTERS ────────────────────────────────────────────────────────
+
+function drawSpatialLow(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  // Smooth blue gradient sky, very slight cloud drift
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, `hsl(210, 85%, ${50 + 4*Math.sin(t*0.4)}%)`);
+  g.addColorStop(1, `hsl(205, 75%, ${62 + 3*Math.cos(t*0.3)}%)`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Soft clouds
+  ctx.save();
+  ctx.globalAlpha = 0.25;
+  for (let i = 0; i < 3; i++) {
+    const cx = ((W * (i * 0.36 + 0.1)) + t * (8 + i * 3)) % (W + 120) - 60;
+    const cy = 60 + i * 30;
+    const r = 55 + i * 20;
+    const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g2.addColorStop(0, 'rgba(255,255,255,0.9)');
+    g2.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, r, r * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawSpatialHigh(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  ctx.fillStyle = '#0f1117';
+  ctx.fillRect(0, 0, W, H);
+
+  const cellW = 18, cellH = 18;
+  const offX = (t * 12) % cellW;
+  const offY = (t * 8)  % cellH;
+
+  for (let y = -cellH; y < H + cellH; y += cellH) {
+    for (let x = -cellW; x < W + cellW; x += cellW) {
+      const px = x + offX, py = y + offY;
+      // Wire
+      ctx.strokeStyle = 'rgba(245,158,11,0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + cellW, py + cellH);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px + cellW, py);
+      ctx.lineTo(px, py + cellH);
+      ctx.stroke();
+      // Node dot
+      ctx.fillStyle = 'rgba(245,158,11,0.7)';
+      ctx.beginPath();
+      ctx.arc(px, py, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Overlay tint for depth
+  const vg = ctx.createLinearGradient(0, 0, W, H);
+  vg.addColorStop(0, 'rgba(15,17,23,0.35)');
+  vg.addColorStop(1, 'rgba(15,17,23,0.1)');
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawSpatialNoise(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const id = ctx.createImageData(W, H);
+  const data = id.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const v = Math.random() * 255;
+    // Slight pink tint to noise
+    data[i]   = v * 0.85 + 20;
+    data[i+1] = v * 0.3;
+    data[i+2] = v * 0.6 + 10;
+    data[i+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+// ─── FFT PAINTERS ─────────────────────────────────────────────────────────────
+
+function drawFFTLow(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const cx = W / 2, cy = H / 2;
+
+  ctx.fillStyle = '#070809';
+  ctx.fillRect(0, 0, W, H);
+
+  // Cross-hair faint lines
+  ctx.strokeStyle = 'rgba(59,130,246,0.06)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+
+  // Faint outer ring
+  const maxR = Math.min(W, H) * 0.45;
+  for (let r = maxR * 0.25; r <= maxR; r += maxR * 0.25) {
+    ctx.strokeStyle = `rgba(59,130,246,${0.04 * (1 - r/maxR + 0.3)})`;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Bright pulsing center spot — the DC component
+  const pulse = 0.85 + 0.15 * Math.sin(t * 1.8);
+
+  // Outer glow
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60 * pulse);
+  glow.addColorStop(0,   'rgba(147,197,253,0.55)');
+  glow.addColorStop(0.3, 'rgba(59,130,246,0.25)');
+  glow.addColorStop(1,   'rgba(59,130,246,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(cx, cy, 60 * pulse, 0, Math.PI * 2); ctx.fill();
+
+  // Core bright spot
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18 * pulse);
+  core.addColorStop(0, 'rgba(255,255,255,0.95)');
+  core.addColorStop(0.4, 'rgba(147,197,253,0.8)');
+  core.addColorStop(1, 'rgba(59,130,246,0)');
+  ctx.fillStyle = core;
+  ctx.beginPath(); ctx.arc(cx, cy, 18 * pulse, 0, Math.PI * 2); ctx.fill();
+
+  // Label
+  ctx.fillStyle = 'rgba(59,130,246,0.5)';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('DC COMPONENT', cx, cy + 38);
+}
+
+function drawFFTHigh(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const cx = W / 2, cy = H / 2;
+
+  ctx.fillStyle = '#070809';
+  ctx.fillRect(0, 0, W, H);
+
+  const maxR = Math.min(W, H) * 0.45;
+
+  // Concentric rings — dim at center, bright far out
+  for (let r = 6; r <= maxR; r += 6) {
+    const norm = r / maxR; // 0..1
+    // energy increases with r for high frequency
+    const alpha = norm * norm * 0.7 + 0.02;
+    ctx.strokeStyle = `rgba(245,158,11,${alpha})`;
+    ctx.lineWidth = 1 + norm * 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Bright ring near edge
+  const ringR = maxR * (0.80 + 0.06 * Math.sin(t * 1.2));
+  const ringGlow = ctx.createRadialGradient(cx, cy, ringR - 20, cx, cy, ringR + 20);
+  ringGlow.addColorStop(0,   'rgba(245,158,11,0)');
+  ringGlow.addColorStop(0.5, 'rgba(245,158,11,0.5)');
+  ringGlow.addColorStop(1,   'rgba(245,158,11,0)');
+  ctx.strokeStyle = ringGlow;
+  ctx.lineWidth = 16;
+  ctx.beginPath(); ctx.arc(cx, cy, ringR, 0, Math.PI * 2); ctx.stroke();
+
+  // Faint center (low freq = dark)
+  const darkCenter = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR * 0.25);
+  darkCenter.addColorStop(0,   '#070809');
+  darkCenter.addColorStop(0.7, 'rgba(7,8,9,0.7)');
+  darkCenter.addColorStop(1,   'rgba(7,8,9,0)');
+  ctx.fillStyle = darkCenter;
+  ctx.beginPath(); ctx.arc(cx, cy, maxR * 0.3, 0, Math.PI * 2); ctx.fill();
+
+  // Label
+  ctx.fillStyle = 'rgba(245,158,11,0.5)';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('HIGH-FREQ RING', cx, H - 16);
+}
+
+function drawFFTNoise(ctx, t) {
+  const W = ctx.canvas.width, H = ctx.canvas.height;
+  const cx = W / 2, cy = H / 2;
+
+  // The FFT of white noise = FLAT SPECTRUM — uniform energy at every frequency.
+  // We show this as a smooth, near-uniform brightness field (not chaotic pixels).
+  // A slow shimmering uniform glow communicates "equal energy everywhere."
+
+  // Background: dark base
+  ctx.fillStyle = '#070809';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw a flat uniform grid of equal-magnitude "frequency bins"
+  // Each cell glows equally — no center bias, no ring — truly flat.
+  const cellSize = 14;
+  for (let y = 0; y < H; y += cellSize) {
+    for (let x = 0; x < W; x += cellSize) {
+      // Slight shimmer per cell using a stable hash + time
+      const seed = (x * 7 + y * 13);
+      const shimmer = 0.55 + 0.25 * Math.sin(t * 1.5 + seed * 0.04);
+      const alpha = shimmer;
+      ctx.fillStyle = `rgba(236,72,153,${alpha * 0.55})`;
+      ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+    }
+  }
+
+  // Overlay a subtle scanline for texture
+  for (let y = 0; y < H; y += 3) {
+    ctx.fillStyle = 'rgba(7,8,9,0.18)';
+    ctx.fillRect(0, y, W, 1);
+  }
+
+  // Show center has NO special peak — draw a dim circle to highlight its ordinariness
+  const pulse = 0.5 + 0.15 * Math.sin(t * 2);
+  ctx.strokeStyle = `rgba(236,72,153,${pulse})`;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.arc(cx, cy, 28, 0, Math.PI * 2); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Small label inside circle: "no peak"
+  ctx.fillStyle = `rgba(236,72,153,${pulse * 0.9})`;
+  ctx.font = 'bold 8px Space Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('NO PEAK', cx, cy + 3);
+
+  // Annotate corners to show uniform spread
+  ctx.fillStyle = 'rgba(236,72,153,0.35)';
+  ctx.font = '8px Space Mono, monospace';
+  ctx.fillText('·', 20,  18);
+  ctx.fillText('·', W-20, 18);
+  ctx.fillText('·', 20,  H-18);
+  ctx.fillText('·', W-20, H-18);
+
+  // Bottom label
+  ctx.fillStyle = 'rgba(236,72,153,0.65)';
+  ctx.font = '10px Space Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('FLAT SPECTRUM — EQUAL ENERGY AT ALL FREQUENCIES', cx, H - 14);
+}
+
+// ─── ANIMATION LOOP ───────────────────────────────────────────────────────────
+
+function render() {
+  t += 0.016;
+  if (currentType === 'low') {
+    drawSpatialLow(sCtx, t);
+    drawFFTLow(fCtx, t);
+  } else if (currentType === 'high') {
+    drawSpatialHigh(sCtx, t);
+    drawFFTHigh(fCtx, t);
+  } else {
+    drawSpatialNoise(sCtx, t);
+    drawFFTNoise(fCtx, t);
+  }
+  animFrame = requestAnimationFrame(render);
+}
+
+// ─── UI ───────────────────────────────────────────────────────────────────────
+
+const infos = {
+  low: {
+    icon: '🌤',
+    title: 'Low Frequency — Blue Sky',
+    desc:  'Nearly uniform pixel values, almost no variation across the image. All energy concentrates in a single bright spot at the <strong>center</strong> of the FFT spectrum (DC component = 0 Hz).',
+    cls:   'low'
+  },
+  high: {
+    icon: '🔗',
+    title: 'High Frequency — Chain-link Fence',
+    desc:  'Rapid pixel transitions repeat at a fixed spatial period. Energy concentrates in a <strong>bright ring far from the center</strong> of the FFT, reflecting the dominant repeating frequency.',
+    cls:   'high'
+  },
+  noise: {
+    icon: '⚡',
+    title: 'Noise — Random Pixel Variations',
+    desc:  'No dominant frequency — every spatial frequency has equal probability. Energy spreads <strong>uniformly across the entire FFT</strong>, with no bright spot or ring.',
+    cls:   'noise'
+  }
+};
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentType = btn.dataset.type;
+    t = 0;
+
+    const inf = infos[currentType];
+    document.getElementById('info-bar').className     = `info-bar ${inf.cls}`;
+    document.getElementById('info-icon').textContent  = inf.icon;
+    const title = document.getElementById('info-title');
+    title.textContent   = inf.title;
+    title.className     = `info-title ${inf.cls}`;
+    document.getElementById('info-desc').innerHTML    = inf.desc;
+
+    ['dot-spatial','dot-fft'].forEach(id => {
+      const d = document.getElementById(id);
+      d.className = `panel-dot ${inf.cls}`;
+    });
+  });
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT: Pixel-Space → Frequency-Space</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #080c14;
+    --panel: #0d1520;
+    --border: #1a2840;
+    --cyan: #00e5ff;
+    --lime: #b8ff3c;
+    --amber: #ffaa00;
+    --pink: #ff4f8b;
+    --text: #c8deff;
+    --dim: #4a6080;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 36px;
+  }
+
+  .step-badge {
+    display: inline-block;
+    background: var(--cyan);
+    color: var(--bg);
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 11px;
+    letter-spacing: 3px;
+    padding: 4px 14px;
+    border-radius: 2px;
+    margin-bottom: 14px;
+  }
+
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: clamp(22px, 4vw, 38px);
+    line-height: 1.15;
+    color: #fff;
+  }
+
+  header h1 span { color: var(--cyan); }
+
+  .subtitle {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 1px;
+  }
+
+  /* ── Main layout ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 0;
+    align-items: start;
+    margin-bottom: 28px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .panel-body { padding: 20px; }
+
+  /* Arrow connector */
+  .arrow-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    margin-top: 60px;
+  }
+
+  .arrow-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    text-align: center;
+  }
+
+  .arrow-fn {
+    font-size: 11px;
+    color: var(--lime);
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+
+  .arrow-svg { display: block; }
+
+  /* Canvas wrappers */
+  .canvas-wrap {
+    position: relative;
+    display: flex;
+    justify-content: center;
+  }
+
+  canvas {
+    border-radius: 3px;
+    cursor: crosshair;
+    display: block;
+  }
+
+  #pixelCanvas { border: 1px solid var(--border); }
+
+  .canvas-label {
+    text-align: center;
+    font-size: 10px;
+    color: var(--dim);
+    margin-top: 8px;
+    letter-spacing: 1px;
+  }
+
+  /* Color scale */
+  .color-scale {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 10px;
+    color: var(--dim);
+  }
+
+  .scale-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: linear-gradient(to right, #000, #002a4a, #00aaff, #00e5ff, #ffffff);
+  }
+
+  /* Pixel info */
+  .info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
+  .info-cell {
+    background: rgba(0,229,255,.05);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 12px;
+  }
+
+  .info-cell .label {
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 1.5px;
+    margin-bottom: 4px;
+  }
+
+  .info-cell .value {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--cyan);
+  }
+
+  /* Wave decomp panel */
+  .wave-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+
+  .wave-body { padding: 18px 20px; }
+
+  .wave-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 10px;
+  }
+
+  .wave-row:last-child { margin-bottom: 0; }
+
+  .wave-label {
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    width: 60px;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .wave-bar-wrap {
+    flex: 1;
+    height: 36px;
+    position: relative;
+    overflow: hidden;
+    border-radius: 3px;
+    background: rgba(0,0,0,.4);
+  }
+
+  .wave-canvas { display: block; }
+
+  .wave-amp {
+    font-size: 10px;
+    color: var(--amber);
+    width: 48px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all .2s;
+  }
+
+  .btn:hover, .btn.active {
+    border-color: var(--cyan);
+    color: var(--cyan);
+    box-shadow: 0 0 12px rgba(0,229,255,.15);
+  }
+
+  .btn.primary {
+    background: var(--cyan);
+    border-color: var(--cyan);
+    color: var(--bg);
+    font-weight: 700;
+  }
+
+  .btn.primary:hover {
+    background: #33ecff;
+    box-shadow: 0 0 20px rgba(0,229,255,.4);
+    color: var(--bg);
+  }
+
+  /* Equation */
+  .eq-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+
+  .eq-title {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--dim);
+    margin-bottom: 10px;
+  }
+
+  .eq-text {
+    font-size: 13px;
+    color: var(--lime);
+    line-height: 1.8;
+  }
+
+  .eq-text .hl { color: var(--cyan); }
+  .eq-text .hl2 { color: var(--pink); }
+  .eq-text .hl3 { color: var(--amber); }
+
+  /* Hover tooltip */
+  .tooltip {
+    position: fixed;
+    background: rgba(13,21,32,.95);
+    border: 1px solid var(--cyan);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 10px;
+    color: var(--cyan);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 100;
+  }
+
+  .tooltip.show { opacity: 1; }
+
+  /* Glow accents */
+  .glow-cyan { text-shadow: 0 0 20px var(--cyan); color: var(--cyan); }
+  .glow-lime { text-shadow: 0 0 20px var(--lime); color: var(--lime); }
+
+  /* Scan line effect on freq canvas */
+  #freqCanvas {
+    filter: drop-shadow(0 0 8px rgba(0,229,255,.3));
+  }
+
+  /* Bottom explain */
+  .explain {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    border-radius: 6px;
+    padding: 16px 20px;
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--text);
+  }
+
+  .explain strong { color: var(--cyan); }
+
+  /* Animate transform arrow */
+  @keyframes pulse-arrow {
+    0%, 100% { opacity: .5; transform: scaleX(1); }
+    50% { opacity: 1; transform: scaleX(1.05); }
+  }
+
+  .arrow-animate { animation: pulse-arrow 2s ease-in-out infinite; }
+
+  @keyframes scanline {
+    0% { top: -2px; }
+    100% { top: 100%; }
+  }
+
+  .freq-wrap::after {
+    content: '';
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    top: 0;
+    animation: scanline 3s linear infinite;
+    pointer-events: none;
+    opacity: 0.4;
+  }
+
+  .freq-wrap { position: relative; }
+</style>
+</head>
+<body>
+
+<div class="wrapper">
+  <header>
+    <div class="step-badge">STEP 2</div>
+    <h1>Pixel-Space <span>→</span> Frequency-Space</h1>
+    <p class="subtitle">np.fft.fft2() · each pixel's brightness becomes a mix of frequency contributions</p>
+  </header>
+
+  <!-- Equation -->
+  <div class="eq-panel">
+    <div class="eq-title">DFT 2D FORMULA</div>
+    <div class="eq-text">
+      F(<span class="hl">u</span>, <span class="hl2">v</span>) &nbsp;=&nbsp; Σₓ Σᵧ &nbsp; <span class="hl3">f(x,y)</span> · e<sup>−j2π(<span class="hl">u</span>x/M + <span class="hl2">v</span>y/N)</sup>
+      &nbsp;&nbsp;|&nbsp;&nbsp;
+      <span class="hl3">f(x,y)</span> = pixel brightness &nbsp;·&nbsp;
+      <span class="hl">u</span>,<span class="hl2">v</span> = frequency indices
+    </div>
+  </div>
+
+  <!-- Main three-column -->
+  <div class="main-grid">
+
+    <!-- PIXEL SPACE -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot" style="background:var(--amber)"></div>
+        <div class="panel-title" style="color:var(--amber)">Pixel Space &nbsp;f(x, y)</div>
+      </div>
+      <div class="panel-body">
+        <div class="canvas-wrap">
+          <canvas id="pixelCanvas" width="240" height="240"></canvas>
+        </div>
+        <div class="canvas-label">CLICK or DRAW to paint · hover to inspect</div>
+
+        <div class="info-grid">
+          <div class="info-cell">
+            <div class="label">HOVER POSITION</div>
+            <div class="value" id="posVal">(—, —)</div>
+          </div>
+          <div class="info-cell">
+            <div class="label">BRIGHTNESS f(x,y)</div>
+            <div class="value" id="brightVal">—</div>
+          </div>
+        </div>
+
+        <div class="controls" style="margin-top:14px">
+          <button class="btn primary" id="presetChecker">Checkerboard</button>
+          <button class="btn" id="presetGrad">Gradient</button>
+          <button class="btn" id="presetStripes">Stripes</button>
+          <button class="btn" id="presetDot">Single Dot</button>
+          <button class="btn" id="clearBtn">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ARROW -->
+    <div class="arrow-col">
+      <div class="arrow-box">
+        <div class="arrow-fn">np.fft.fft2()</div>
+        <svg class="arrow-svg arrow-animate" width="60" height="24" viewBox="0 0 60 24">
+          <defs>
+            <linearGradient id="ag" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stop-color="#ffaa00"/>
+              <stop offset="100%" stop-color="#00e5ff"/>
+            </linearGradient>
+          </defs>
+          <line x1="4" y1="12" x2="50" y2="12" stroke="url(#ag)" stroke-width="2"/>
+          <polyline points="42,5 52,12 42,19" fill="none" stroke="#00e5ff" stroke-width="2"/>
+        </svg>
+        <div style="font-size:9px;color:var(--dim);margin-top:6px;letter-spacing:1px">FFT TRANSFORM</div>
+      </div>
+    </div>
+
+    <!-- FREQ SPACE -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-dot" style="background:var(--cyan)"></div>
+        <div class="panel-title" style="color:var(--cyan)">Frequency Space &nbsp;F(u, v)</div>
+      </div>
+      <div class="panel-body">
+        <div class="canvas-wrap freq-wrap">
+          <canvas id="freqCanvas" width="240" height="240"></canvas>
+        </div>
+        <div class="canvas-label">LOG MAGNITUDE SPECTRUM &nbsp;·&nbsp; CENTER = DC (zero freq)</div>
+        <div class="color-scale">
+          <span>LOW</span>
+          <div class="scale-bar"></div>
+          <span>HIGH</span>
+        </div>
+        <div class="info-grid">
+          <div class="info-cell">
+            <div class="label">FREQ COMPONENT</div>
+            <div class="value" id="freqVal">(—, —)</div>
+          </div>
+          <div class="info-cell">
+            <div class="label">|F(u,v)| LOG MAG</div>
+            <div class="value" id="magVal">—</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;font-size:10px;color:var(--dim);line-height:1.8">
+          <span style="color:var(--cyan)">■</span> Bright center = dominant low freq (smooth regions)<br>
+          <span style="color:var(--lime)">■</span> Bright edges = high freq (sharp edges, fine texture)
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Wave decomposition -->
+  <div class="wave-panel">
+    <div class="panel-header">
+      <div class="panel-dot" style="background:var(--pink)"></div>
+      <div class="panel-title" style="color:var(--pink)">Frequency Decomposition — Row Slices of the Image</div>
+    </div>
+    <div class="wave-body" id="waveBody">
+      <!-- JS renders wave rows here -->
+    </div>
+  </div>
+
+  <!-- Explain -->
+  <div class="explain">
+    <strong>How it works:</strong> <code>np.fft.fft2()</code> decomposes the 2D image into a sum of 2D sinusoidal waves, each with a specific frequency (u, v), amplitude, and phase.
+    The <strong>magnitude spectrum</strong> shown above uses a log scale: <code>log(1 + |F(u,v)|)</code>.
+    The <strong>bright center</strong> represents low-frequency (DC) components — the average brightness of smooth regions.
+    <strong>Moving outward</strong> captures progressively higher frequencies — sharp edges, fine textures, and noise.
+    Every pixel's brightness <strong>contributes to every frequency bin</strong> simultaneously.
+    Hover the pixel canvas to inspect individual f(x,y) values and see how they map to frequency contributions.
+  </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ─── FFT Implementation (Cooley-Tukey) ───────────────────────────────────────
+function fft(re, im) {
+  const N = re.length;
+  if (N <= 1) return;
+  const re_even = [], re_odd = [], im_even = [], im_odd = [];
+  for (let i = 0; i < N; i += 2) {
+    re_even.push(re[i]); im_even.push(im[i]);
+    re_odd.push(re[i+1]); im_odd.push(im[i+1]);
+  }
+  fft(re_even, im_even);
+  fft(re_odd, im_odd);
+  for (let k = 0; k < N/2; k++) {
+    const angle = -2 * Math.PI * k / N;
+    const wr = Math.cos(angle), wi = Math.sin(angle);
+    const tr = wr*re_odd[k] - wi*im_odd[k];
+    const ti = wr*im_odd[k] + wi*re_odd[k];
+    re[k]       = re_even[k] + tr;
+    im[k]       = im_even[k] + ti;
+    re[k+N/2]   = re_even[k] - tr;
+    im[k+N/2]   = im_even[k] - ti;
+  }
+}
+
+function fft2(grid, N) {
+  // grid: NxN array of real values → returns {re, im} each NxN
+  let re = grid.map(r => [...r]);
+  let im = grid.map(() => new Array(N).fill(0));
+  // Row FFTs
+  for (let r = 0; r < N; r++) fft(re[r], im[r]);
+  // Col FFTs
+  for (let c = 0; c < N; c++) {
+    const colRe = re.map(r => r[c]);
+    const colIm = im.map(r => r[c]);
+    fft(colRe, colIm);
+    for (let r = 0; r < N; r++) { re[r][c] = colRe[r]; im[r][c] = colIm[r]; }
+  }
+  return { re, im };
+}
+
+function fftShift(re, im, N) {
+  // Shift DC to center
+  const half = N / 2;
+  const mag = Array.from({length:N}, () => new Array(N).fill(0));
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const sr = (r + half) % N;
+      const sc = (c + half) % N;
+      mag[sr][sc] = Math.sqrt(re[r][c]**2 + im[r][c]**2);
+    }
+  }
+  return mag;
+}
+
+// ─── App State ────────────────────────────────────────────────────────────────
+const N = 32; // grid size (power of 2 for FFT)
+const CS = 240; // canvas size
+const cell = CS / N;
+
+let grid = Array.from({length:N}, () => new Array(N).fill(0));
+let fftMag = null;
+let drawing = false;
+
+const pixCanvas = document.getElementById('pixelCanvas');
+const freqCanvas = document.getElementById('freqCanvas');
+const pCtx = pixCanvas.getContext('2d');
+const fCtx = freqCanvas.getContext('2d');
+
+// ─── Presets ──────────────────────────────────────────────────────────────────
+function setGrid(fn) {
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++)
+      grid[r][c] = Math.max(0, Math.min(255, fn(r, c)));
+  update();
+}
+
+document.getElementById('presetChecker').onclick = () =>
+  setGrid((r,c) => ((r+c)%2===0) ? 220 : 30);
+
+document.getElementById('presetGrad').onclick = () =>
+  setGrid((r,c) => Math.round(c / (N-1) * 255));
+
+document.getElementById('presetStripes').onclick = () =>
+  setGrid((r,c) => Math.round((Math.sin(c/N*Math.PI*4)+1)/2*220));
+
+document.getElementById('presetDot').onclick = () =>
+  setGrid((r,c) => (r===N/2&&c===N/2)?255:0);
+
+document.getElementById('clearBtn').onclick = () =>
+  setGrid(() => 0);
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function getCell(e) {
+  const rect = pixCanvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) / cell);
+  const y = Math.floor((e.clientY - rect.top) / cell);
+  return [Math.max(0,Math.min(N-1,x)), Math.max(0,Math.min(N-1,y))];
+}
+
+pixCanvas.addEventListener('mousedown', e => { drawing = true; paint(e); });
+pixCanvas.addEventListener('mousemove', e => {
+  if (drawing) paint(e);
+  inspect(e);
+});
+pixCanvas.addEventListener('mouseup', () => drawing = false);
+pixCanvas.addEventListener('mouseleave', () => drawing = false);
+
+function paint(e) {
+  const [x,y] = getCell(e);
+  grid[y][x] = e.buttons === 1 ? 220 : 0;
+  update();
+}
+
+const tooltip = document.getElementById('tooltip');
+function inspect(e) {
+  const [x,y] = getCell(e);
+  const v = grid[y][x];
+  document.getElementById('posVal').textContent = `(${x}, ${y})`;
+  document.getElementById('brightVal').textContent = v.toFixed(0);
+}
+
+// ─── Freq Canvas Hover ────────────────────────────────────────────────────────
+freqCanvas.addEventListener('mousemove', e => {
+  if (!fftMag) return;
+  const rect = freqCanvas.getBoundingClientRect();
+  const x = Math.floor((e.clientX - rect.left) / cell);
+  const y = Math.floor((e.clientY - rect.top) / cell);
+  const cx = Math.max(0, Math.min(N-1, x));
+  const cy = Math.max(0, Math.min(N-1, y));
+  const mag = fftMag[cy][cx];
+  const logMag = Math.log(1 + mag);
+  const u = cx - N/2, v = cy - N/2;
+  document.getElementById('freqVal').textContent = `(${u}, ${v})`;
+  document.getElementById('magVal').textContent = logMag.toFixed(2);
+});
+
+// ─── Render Pixel Canvas ──────────────────────────────────────────────────────
+function renderPixels() {
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const v = grid[r][c];
+      pCtx.fillStyle = `rgb(${v},${Math.round(v*.6)},0)`;
+      pCtx.fillRect(c*cell, r*cell, cell, cell);
+    }
+  }
+  // Grid lines
+  pCtx.strokeStyle = 'rgba(0,0,0,.3)';
+  pCtx.lineWidth = .5;
+  for (let i = 0; i <= N; i++) {
+    pCtx.beginPath(); pCtx.moveTo(i*cell, 0); pCtx.lineTo(i*cell, CS); pCtx.stroke();
+    pCtx.beginPath(); pCtx.moveTo(0, i*cell); pCtx.lineTo(CS, i*cell); pCtx.stroke();
+  }
+}
+
+// ─── Render Freq Canvas ───────────────────────────────────────────────────────
+function renderFreq() {
+  const { re, im } = fft2(grid, N);
+  fftMag = fftShift(re, im, N);
+
+  // Log scale & normalize
+  let maxLog = 0;
+  const logMag = fftMag.map(row => row.map(v => {
+    const l = Math.log(1 + v);
+    maxLog = Math.max(maxLog, l);
+    return l;
+  }));
+
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const norm = maxLog > 0 ? logMag[r][c] / maxLog : 0;
+      // Cyan glow colormap
+      const b = Math.round(norm * 255);
+      const g = Math.round(norm * norm * 200);
+      const rb = Math.round(norm > 0.7 ? (norm-0.7)/0.3*255 : 0);
+      fCtx.fillStyle = `rgb(${rb},${g},${b})`;
+      fCtx.fillRect(c*cell, r*cell, cell, cell);
+
+      // Center highlight (DC)
+      if (r === N/2 && c === N/2) {
+        fCtx.fillStyle = 'rgba(255,255,255,.2)';
+        fCtx.fillRect(c*cell, r*cell, cell, cell);
+      }
+    }
+  }
+  // Center crosshair
+  fCtx.strokeStyle = 'rgba(0,229,255,.5)';
+  fCtx.lineWidth = .5;
+  fCtx.setLineDash([2,2]);
+  fCtx.beginPath();
+  fCtx.moveTo(N/2*cell, 0); fCtx.lineTo(N/2*cell, CS);
+  fCtx.moveTo(0, N/2*cell); fCtx.lineTo(CS, N/2*cell);
+  fCtx.stroke();
+  fCtx.setLineDash([]);
+}
+
+// ─── Wave Decomposition Rows ──────────────────────────────────────────────────
+function renderWaves() {
+  const body = document.getElementById('waveBody');
+  body.innerHTML = '';
+
+  // Show FFT of row 0,8,16,24
+  const rows = [0, 8, 16, 24];
+  const labels = ['Row 0', 'Row 8', 'Row 16', 'Row 24'];
+  const colors = ['#ffaa00','#00e5ff','#b8ff3c','#ff4f8b'];
+
+  rows.forEach((ri, i) => {
+    const signal = [...grid[ri]];
+    const imArr = new Array(N).fill(0);
+    const reArr = [...signal];
+    fft(reArr, imArr);
+    const mags = reArr.map((r,k) => Math.sqrt(r*r + imArr[k]*imArr[k]));
+    const maxMag = Math.max(...mags, 1);
+
+    const row = document.createElement('div');
+    row.className = 'wave-row';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'wave-label';
+    lbl.textContent = labels[i];
+    row.appendChild(lbl);
+
+    const wrap = document.createElement('div');
+    wrap.className = 'wave-bar-wrap';
+
+    const wc = document.createElement('canvas');
+    wc.className = 'wave-canvas';
+    wc.width = wrap.offsetWidth || 500;
+    wc.height = 36;
+    wrap.appendChild(wc);
+    row.appendChild(wrap);
+
+    const amp = document.createElement('div');
+    amp.className = 'wave-amp';
+    amp.textContent = maxMag.toFixed(0);
+    row.appendChild(amp);
+
+    body.appendChild(row);
+
+    // Draw waveform (spatial) & spectrum bars
+    setTimeout(() => {
+      const W = wrap.clientWidth || 480;
+      wc.width = W;
+      const ctx = wc.getContext('2d');
+      ctx.clearRect(0, 0, W, 36);
+
+      // Spectrum bars (half because symmetric)
+      const half = N/2;
+      const barW = W / half - 1;
+      for (let k = 0; k <= half; k++) {
+        const norm = mags[k] / maxMag;
+        const h = norm * 32;
+        ctx.fillStyle = colors[i] + Math.round(norm*255).toString(16).padStart(2,'0');
+        ctx.fillRect(k * (barW+1), 36-h, barW, h);
+      }
+
+      // Overlay waveform
+      ctx.beginPath();
+      ctx.strokeStyle = colors[i];
+      ctx.lineWidth = 1.5;
+      const step = W / (N-1);
+      for (let x = 0; x < N; x++) {
+        const norm = signal[x] / 255;
+        const py = 36 - norm * 32 - 2;
+        x === 0 ? ctx.moveTo(0, py) : ctx.lineTo(x*step, py);
+      }
+      ctx.stroke();
+    }, 20);
+  });
+}
+
+// ─── Main Update ──────────────────────────────────────────────────────────────
+function update() {
+  renderPixels();
+  renderFreq();
+  renderWaves();
+}
+
+// Init with checkerboard
+setGrid((r,c) => ((r+c)%2===0) ? 220 : 30);
+</script>
+</body>
+</html>

@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>fftshift — Visualized</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #11111a;
+    --border: #1e1e2e;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --accent3: #a855f7;
+    --low: #00e5ff;
+    --high: #ff6b35;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px 60px;
+    overflow-x: hidden;
+  }
+
+  /* Background grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+    position: relative;
+  }
+
+  .tag {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    opacity: 0.8;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
+  }
+
+  h1 span {
+    color: var(--accent);
+  }
+
+  .subtitle {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--muted);
+    max-width: 480px;
+    line-height: 1.7;
+  }
+
+  /* Main demo area */
+  .demo-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .grids-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .grid-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .grid-label {
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .grid-label strong {
+    color: var(--text);
+  }
+
+  canvas {
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    image-rendering: pixelated;
+  }
+
+  .arrow-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .arrow-label {
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .arrow {
+    font-size: 28px;
+    color: var(--accent);
+    animation: pulse-arrow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-arrow {
+    0%, 100% { opacity: 0.4; transform: translateX(0); }
+    50% { opacity: 1; transform: translateX(6px); }
+  }
+
+  /* Quadrant diagram */
+  .quadrant-section {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px;
+  }
+
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 24px;
+  }
+
+  .quad-diagrams {
+    display: flex;
+    gap: 40px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .quad-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .quad-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    width: 160px;
+    height: 160px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .quad {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    transition: all 0.6s ease;
+    position: relative;
+  }
+
+  /* Before fftshift - high freq corners */
+  .before .q1 { background: rgba(255,107,53,0.35); color: var(--high); }
+  .before .q2 { background: rgba(255,107,53,0.35); color: var(--high); }
+  .before .q3 { background: rgba(255,107,53,0.35); color: var(--high); }
+  .before .q4 { background: rgba(255,107,53,0.35); color: var(--high); }
+
+  /* DC label overlaid in the center */
+  .quad-grid.before::after {
+    content: 'DC';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(0,229,255,0.6);
+    background: var(--panel);
+    padding: 2px 6px;
+    border: 1px solid rgba(0,229,255,0.3);
+    border-radius: 2px;
+    letter-spacing: 0.1em;
+  }
+
+  /* After fftshift - low freq center */
+  .after .q1 { background: rgba(255,107,53,0.2); color: var(--high); }
+  .after .q2 { background: rgba(255,107,53,0.2); color: var(--high); }
+  .after .q3 { background: rgba(255,107,53,0.2); color: var(--high); }
+  .after .q4 { background: rgba(255,107,53,0.2); color: var(--high); }
+
+  .after-inner {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 70px; height: 70px;
+    border-radius: 50%;
+    background: rgba(0,229,255,0.2);
+    border: 1.5px solid rgba(0,229,255,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    color: var(--low);
+    letter-spacing: 0.05em;
+  }
+
+  .quad-diagram-label {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .quad-arrow {
+    font-size: 22px;
+    color: var(--accent);
+  }
+
+  /* Interactive filter demo */
+  .filter-section {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px;
+  }
+
+  .filter-row {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .filter-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .step-num {
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--accent3);
+    text-transform: uppercase;
+  }
+
+  .filter-arrow {
+    font-size: 20px;
+    color: var(--border);
+    align-self: center;
+    margin-top: 30px;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  button {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 10px 24px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 1px solid;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+  .btn-primary:hover { background: transparent; color: var(--accent); }
+
+  .btn-secondary {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-active {
+    border-color: var(--accent3) !important;
+    color: var(--accent3) !important;
+  }
+
+  /* Slider */
+  .slider-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 120px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  .legend {
+    display: flex;
+    gap: 20px;
+    font-size: 11px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+  }
+
+  .info-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    width: 100%;
+    max-width: 900px;
+  }
+
+  .info-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .info-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    right: 0;
+    height: 2px;
+  }
+
+  .info-card.blue::before { background: var(--accent); }
+  .info-card.orange::before { background: var(--accent2); }
+  .info-card.purple::before { background: var(--accent3); }
+
+  .card-icon { font-size: 20px; margin-bottom: 10px; }
+  .card-title { font-family: 'Syne', sans-serif; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+  .card-text { font-size: 11px; color: var(--muted); line-height: 1.7; }
+
+  .status-bar {
+    width: 100%;
+    max-width: 900px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 16px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: blink 2s ease-in-out infinite;
+  }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+
+  #status-text { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="tag">Signal Processing · Interactive Demo</div>
+  <h1>fft<span>shift</span></h1>
+  <p class="subtitle">Why moving the DC component to center makes everything make sense — and why circular filters need it.</p>
+</header>
+
+<div class="demo-wrapper">
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-dot"></div>
+    <span id="status-text">Hover over the canvas or click Animate to see fftshift in action</span>
+  </div>
+
+  <!-- Live FFT Canvas Demo -->
+  <div class="grids-row">
+    <div class="grid-box">
+      <div class="grid-label">Raw <strong>FFT Output</strong></div>
+      <canvas id="beforeCanvas" width="240" height="240"></canvas>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--high)"></div><span style="color:var(--muted)">high freq (edges)</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--low)"></div><span style="color:var(--muted)">low freq (corners)</span></div>
+      </div>
+    </div>
+
+    <div class="arrow-box">
+      <div class="arrow-label">fftshift</div>
+      <div class="arrow">→</div>
+      <div style="font-size:10px;color:var(--muted)">swap quadrants</div>
+    </div>
+
+    <div class="grid-box">
+      <div class="grid-label">After <strong>fftshift</strong></div>
+      <canvas id="afterCanvas" width="240" height="240"></canvas>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:var(--low)"></div><span style="color:var(--muted)">DC at center</span></div>
+        <div class="legend-item"><div class="legend-dot" style="background:var(--high)"></div><span style="color:var(--muted)">high freq (edges)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn-primary" id="animBtn" onclick="toggleAnimate()">▶ Animate</button>
+    <button class="btn-secondary" id="filterBtn" onclick="toggleFilter()">⊙ Show Low-Pass Filter</button>
+    <div class="slider-group">
+      <span>Radius</span>
+      <input type="range" id="radiusSlider" min="10" max="90" value="40" oninput="updateRadius()">
+      <span id="radiusVal">40</span>
+    </div>
+  </div>
+
+  <!-- Filter Demo Row -->
+  <div class="filter-section">
+    <div class="section-title">// Why fftshift matters for filtering</div>
+    <div class="filter-row">
+      <div class="filter-step">
+        <div class="step-num">step 1</div>
+        <canvas id="imgCanvas" width="160" height="160"></canvas>
+        <div style="font-size:11px;color:var(--muted)">Input Image</div>
+      </div>
+
+      <div class="filter-arrow">→</div>
+
+      <div class="filter-step">
+        <div class="step-num">step 2 — FFT</div>
+        <canvas id="fftCanvas" width="160" height="160"></canvas>
+        <div style="font-size:11px;color:var(--muted)">FFT (DC in corners)</div>
+      </div>
+
+      <div class="filter-arrow">→</div>
+
+      <div class="filter-step">
+        <div class="step-num">step 3 — fftshift</div>
+        <canvas id="shiftCanvas" width="160" height="160"></canvas>
+        <div style="font-size:11px;color:var(--muted)">Shifted (DC center)</div>
+      </div>
+
+      <div class="filter-arrow">→</div>
+
+      <div class="filter-step">
+        <div class="step-num">step 4 — filter</div>
+        <canvas id="filtCanvas" width="160" height="160"></canvas>
+        <div style="font-size:11px;color:var(--muted)">Circle filter applied</div>
+      </div>
+
+      <div class="filter-arrow">→</div>
+
+      <div class="filter-step">
+        <div class="step-num">step 5 — result</div>
+        <canvas id="resultCanvas" width="160" height="160"></canvas>
+        <div style="font-size:11px;color:var(--muted)">Blurred output</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quadrant Explanation -->
+  <div class="quadrant-section">
+    <div class="section-title">// What fftshift actually does</div>
+    <div class="quad-diagrams">
+
+      <div class="quad-diagram">
+        <div style="font-size:11px;color:var(--muted)">Before fftshift</div>
+        <div class="quad-grid before" id="beforeQuad">
+          <div class="quad q1">Q1<br><span style="font-size:9px;opacity:0.6">HIGH</span></div>
+          <div class="quad q2">Q2<br><span style="font-size:9px;opacity:0.6">HIGH</span></div>
+          <div class="quad q3">Q3<br><span style="font-size:9px;opacity:0.6">HIGH</span></div>
+          <div class="quad q4">Q4<br><span style="font-size:9px;opacity:0.6">HIGH</span></div>
+        </div>
+        <div style="font-size:10px;color:var(--high)">DC at corners — awkward</div>
+      </div>
+
+      <div class="quad-arrow" id="swapArrow">⇄</div>
+
+      <div class="quad-diagram">
+        <div style="font-size:11px;color:var(--muted)">After fftshift</div>
+        <div class="quad-grid after" style="position:relative">
+          <div class="quad q1">HIGH</div>
+          <div class="quad q2">HIGH</div>
+          <div class="quad q3">HIGH</div>
+          <div class="quad q4">HIGH</div>
+          <div class="after-inner">DC<br>LOW</div>
+        </div>
+        <div style="font-size:10px;color:var(--low)">DC at center — natural</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Info Cards -->
+  <div class="info-cards">
+    <div class="info-card blue">
+      <div class="card-icon">◎</div>
+      <div class="card-title">DC Component</div>
+      <div class="card-text">The zero-frequency (DC) term is the average brightness of the entire image. It's the strongest signal — after fftshift, it lives at the center where we expect it.</div>
+    </div>
+    <div class="info-card orange">
+      <div class="card-icon">⊞</div>
+      <div class="card-title">Quadrant Swap</div>
+      <div class="card-text">fftshift swaps Q1↔Q3 and Q2↔Q4 simultaneously. It's a circular shift of N/2 in both dimensions — a simple but powerful rearrangement.</div>
+    </div>
+    <div class="info-card purple">
+      <div class="card-icon">⌾</div>
+      <div class="card-title">Circular Filters</div>
+      <div class="card-text">Low-pass filters are circles centered at (0,0). Without fftshift, that center is in the corner — your circular mask would hit 4 separate corners, not the DC blob.</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ─── Synthetic spectrum generator ───────────────────────────────────────────
+  const N = 240;
+  let animating = false;
+  let animFrame = null;
+  let showFilter = false;
+  let filterRadius = 40;
+  let animT = 0;
+
+  function getSpectrum(t) {
+    // Simulate a realistic FFT magnitude spectrum
+    const data = new Float32Array(N * N);
+    const cx = N / 2, cy = N / 2;
+    
+    // Build shifted version (natural), then we'll also derive un-shifted
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        const dx = x - cx, dy = y - cy;
+        const r = Math.sqrt(dx * dx + dy * dy);
+        // 1/f spectrum with some noise
+        let val = 1 / (1 + r * 0.18);
+        val = Math.pow(val, 1.4);
+        // Add some oriented features
+        val += 0.12 * Math.exp(-(((dx * Math.cos(0.8) + dy * Math.sin(0.8)) ** 2)) / 80);
+        val += 0.08 * Math.exp(-((r - 30) ** 2) / 60) * (1 + 0.5 * Math.sin(t * 0.05));
+        data[y * N + x] = Math.max(0, val);
+      }
+    }
+    return data;
+  }
+
+  function fftshift(data, w, h) {
+    const out = new Float32Array(data.length);
+    const hw = Math.floor(w / 2), hh = Math.floor(h / 2);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const nx = (x + hw) % w;
+        const ny = (y + hh) % h;
+        out[ny * w + nx] = data[y * w + x];
+      }
+    }
+    return out;
+  }
+
+  function ifftshift(data, w, h) {
+    // ifftshift is the inverse — swaps back
+    const out = new Float32Array(data.length);
+    const hw = Math.floor(w / 2), hh = Math.floor(h / 2);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const nx = (x + hw) % w;
+        const ny = (y + hh) % h;
+        out[y * w + x] = data[ny * w + nx];
+      }
+    }
+    return out;
+  }
+
+  function renderSpectrum(canvas, data, opts = {}) {
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const img = ctx.createImageData(W, H);
+
+    // Find max for normalization
+    let max = 0;
+    for (let i = 0; i < data.length; i++) max = Math.max(max, data[i]);
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const v = data[y * W + x] / max;
+        const log_v = Math.log(1 + v * 9) / Math.log(10); // log scale
+        
+        // Color map: dark → cyan → white (for low→high intensity)
+        let r, g, b;
+        if (log_v < 0.4) {
+          const t = log_v / 0.4;
+          r = t * 0;
+          g = t * 150;
+          b = t * 255;
+        } else if (log_v < 0.7) {
+          const t = (log_v - 0.4) / 0.3;
+          r = t * 255;
+          g = 150 + t * 105;
+          b = 255;
+        } else {
+          const t = (log_v - 0.7) / 0.3;
+          r = 255;
+          g = 255;
+          b = Math.round(255 - t * 120);
+        }
+
+        const idx = (y * W + x) * 4;
+        img.data[idx] = Math.round(r);
+        img.data[idx + 1] = Math.round(g);
+        img.data[idx + 2] = Math.round(b);
+        img.data[idx + 3] = 255;
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+
+    // Draw filter overlay
+    if (opts.filter) {
+      const cx = opts.cx ?? W / 2, cy = opts.cy ?? H / 2;
+      const rad = opts.radius ?? 50;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(168,85,247,0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Fill inside with subtle tint
+      ctx.beginPath();
+      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(168,85,247,0.08)';
+      ctx.fill();
+    }
+  }
+
+  function draw(t) {
+    const shifted = getSpectrum(t);
+    const unshifted = ifftshift(shifted, N, N);
+
+    renderSpectrum(
+      document.getElementById('beforeCanvas'),
+      unshifted,
+      showFilter ? { filter: true, cx: N * 0.25, cy: N * 0.25, radius: filterRadius } : {}
+    );
+    renderSpectrum(
+      document.getElementById('afterCanvas'),
+      shifted,
+      showFilter ? { filter: true, cx: N / 2, cy: N / 2, radius: filterRadius } : {}
+    );
+  }
+
+  // ─── Small filter pipeline ───────────────────────────────────────────────────
+  function drawFilterPipeline() {
+    const SIZE = 160;
+
+    // 1. Input image: synthetic texture
+    const imgCtx = document.getElementById('imgCanvas').getContext('2d');
+    const imgData = imgCtx.createImageData(SIZE, SIZE);
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const v = Math.round(
+          128 + 60 * Math.sin(x / 8) * Math.cos(y / 8) +
+          40 * Math.sin(x / 3 + y / 3) +
+          20 * Math.cos(y / 5)
+        );
+        const i = (y * SIZE + x) * 4;
+        imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = Math.max(0, Math.min(255, v));
+        imgData.data[i+3] = 255;
+      }
+    }
+    imgCtx.putImageData(imgData, 0, 0);
+
+    // 2. FFT spectrum (unshifted) — DC in corners
+    const fftSpectrum = getSpectrum(0);
+    const unshifted = ifftshift(fftSpectrum, SIZE, SIZE);
+    renderSpectrum(document.getElementById('fftCanvas'), unshifted, {});
+
+    // 3. Shifted
+    renderSpectrum(document.getElementById('shiftCanvas'), fftSpectrum, {});
+
+    // 4. Filter applied on shifted
+    const filtCanvas = document.getElementById('filtCanvas');
+    renderSpectrum(filtCanvas, fftSpectrum, { filter: true, cx: SIZE / 2, cy: SIZE / 2, radius: filterRadius * 0.67 });
+
+    // 5. Result: apply mask and show blurred simulation
+    const resultCtx = document.getElementById('resultCanvas').getContext('2d');
+    const masked = new Float32Array(SIZE * SIZE);
+    const cx = SIZE / 2, cy = SIZE / 2, rad = filterRadius * 0.67;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const dx = x - cx, dy = y - cy;
+        const inside = Math.sqrt(dx*dx + dy*dy) <= rad;
+        masked[y * SIZE + x] = inside ? fftSpectrum[y * SIZE + x] : 0;
+      }
+    }
+
+    // Simulate blurred result by showing a smooth low-freq reconstruction
+    const resultData = resultCtx.createImageData(SIZE, SIZE);
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const v = Math.round(
+          128 + 55 * Math.sin(x / 8) * Math.cos(y / 8) * (filterRadius / 90)
+        );
+        const i = (y * SIZE + x) * 4;
+        resultData.data[i] = resultData.data[i+1] = resultData.data[i+2] = Math.max(0, Math.min(255, v));
+        resultData.data[i+3] = 255;
+      }
+    }
+    resultCtx.putImageData(resultData, 0, 0);
+    // Overlay "blurred" label
+    resultCtx.fillStyle = 'rgba(0,229,255,0.7)';
+    resultCtx.font = '9px JetBrains Mono';
+    resultCtx.fillText('Low-pass ✓', 6, SIZE - 8);
+  }
+
+  // ─── Animation loop ──────────────────────────────────────────────────────────
+  function animate() {
+    animT += 1;
+    draw(animT);
+    document.getElementById('status-text').textContent = `fftshift running — frame ${animT} — DC locked at center (${N/2}, ${N/2})`;
+    animFrame = requestAnimationFrame(animate);
+  }
+
+  function toggleAnimate() {
+    animating = !animating;
+    const btn = document.getElementById('animBtn');
+    if (animating) {
+      btn.textContent = '■ Stop';
+      animate();
+    } else {
+      btn.textContent = '▶ Animate';
+      cancelAnimationFrame(animFrame);
+      document.getElementById('status-text').textContent = 'Paused. Toggle filter or adjust radius.';
+    }
+  }
+
+  function toggleFilter() {
+    showFilter = !showFilter;
+    const btn = document.getElementById('filterBtn');
+    btn.classList.toggle('btn-active', showFilter);
+    btn.textContent = showFilter ? '⊙ Hide Filter' : '⊙ Show Low-Pass Filter';
+    if (!animating) draw(animT);
+    drawFilterPipeline();
+    document.getElementById('status-text').textContent = showFilter
+      ? 'Filter overlay ON — circle mask only works correctly on the shifted spectrum'
+      : 'Filter overlay OFF';
+  }
+
+  function updateRadius() {
+    filterRadius = parseInt(document.getElementById('radiusSlider').value);
+    document.getElementById('radiusVal').textContent = filterRadius;
+    if (!animating) draw(animT);
+    drawFilterPipeline();
+  }
+
+  // Quadrant animation
+  let quadFlash = false;
+  setInterval(() => {
+    quadFlash = !quadFlash;
+    document.getElementById('swapArrow').style.color = quadFlash ? 'var(--accent)' : 'var(--accent3)';
+    document.getElementById('swapArrow').style.fontSize = quadFlash ? '28px' : '24px';
+  }, 1400);
+
+  // Initial draw
+  draw(0);
+  drawFilterPipeline();
+</script>
+</body>
+</html>

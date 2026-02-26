@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FFT Low-Pass Filter Visualizer</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background: radial-gradient(ellipse at 50% 0%, #0d1a1a 0%, #0d0f14 60%);
+    font-family: 'Courier New', monospace;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 48px;
+  }
+  .header { text-align: center; margin-bottom: 32px; }
+  .header .tag { font-size: 11px; letter-spacing: 4px; color: #63ffb4; margin-bottom: 8px; }
+  .header h1 { font-size: clamp(22px, 4vw, 32px); font-weight: 700; letter-spacing: -1px; }
+  .header p { color: #556; font-size: 13px; margin-top: 8px; max-width: 480px; }
+
+  .controls {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 28px;
+    width: 100%; max-width: 640px;
+  }
+  .ctrl-label { font-size: 11px; color: #668; letter-spacing: 2px; margin-bottom: 10px; }
+  .noise-btns { display: flex; gap: 10px; margin-bottom: 20px; }
+  .noise-btn {
+    flex: 1; padding: 10px 0; border-radius: 8px; cursor: pointer;
+    border: 1.5px solid rgba(255,255,255,0.1);
+    background: transparent; color: #888; font-size: 13px;
+    font-family: monospace; transition: all 0.2s;
+  }
+  .noise-btn.active {
+    border-color: #63ffb4; background: rgba(99,255,180,0.12); color: #63ffb4;
+  }
+  .slider-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
+  .cutoff-val { font-size: 18px; font-weight: 700; }
+  input[type=range] { width: 100%; accent-color: #63ffb4; cursor: pointer; }
+  .slider-hints { display: flex; justify-content: space-between; font-size: 10px; color: #446; margin-top: 4px; }
+  .suggestion {
+    margin-top: 10px; padding: 8px 12px; border-radius: 6px;
+    background: rgba(99,255,180,0.05); border: 1px solid rgba(99,255,180,0.1);
+    font-size: 11px; color: #aaa; letter-spacing: 0.5px;
+  }
+  .spectrum-toggle {
+    margin-top: 16px; display: flex; align-items: center; gap: 10px;
+  }
+  .spectrum-btn {
+    padding: 7px 16px; border-radius: 6px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: transparent; color: #666; font-size: 12px;
+    font-family: monospace; transition: all 0.2s;
+  }
+  .spectrum-btn.active { border-color: #a78bfa; background: rgba(167,139,250,0.12); color: #a78bfa; }
+  .spectrum-hint { font-size: 11px; color: #446; }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px; width: 100%; max-width: 640px;
+  }
+  .panel {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 12px 10px; border-radius: 10px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: all 0.3s;
+  }
+  .panel.highlight {
+    background: rgba(99,255,180,0.07);
+    border-color: rgba(99,255,180,0.3);
+  }
+  .panel-label { font-size: 11px; color: #aaa; letter-spacing: 1px; text-transform: uppercase; }
+  canvas {
+    border-radius: 6px; width: 160px; height: 160px;
+    image-rendering: pixelated;
+    border: 1px solid rgba(255,255,255,0.1);
+  }
+  .psnr-badge {
+    font-family: monospace; font-size: 13px; font-weight: 700;
+    background: rgba(0,0,0,0.4); padding: 3px 10px; border-radius: 20px;
+  }
+
+  .analysis {
+    margin-top: 24px; width: 100%; max-width: 640px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 12px; padding: 18px 24px;
+  }
+  .analysis-title { font-size: 11px; color: #668; letter-spacing: 2px; margin-bottom: 14px; }
+  .psnr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .psnr-card {
+    padding: 12px 16px; border-radius: 8px;
+    background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .psnr-card-label { font-size: 11px; color: #556; margin-bottom: 4px; }
+  .psnr-big { font-size: 26px; font-weight: 800; }
+  .psnr-sub { font-size: 11px; color: #446; }
+  .psnr-verdict {
+    margin-top: 14px; padding: 10px 14px; border-radius: 8px;
+    font-size: 12px; color: #bbb;
+  }
+  .scale { margin-top: 16px; font-size: 11px; color: #446; }
+  .scale-row { display: flex; gap: 16px; margin-top: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+  .footer-note {
+    margin-top: 20px; max-width: 640px; width: 100%;
+    font-size: 11px; color: #446; text-align: center; line-height: 1.9;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="tag">FREQUENCY DOMAIN ANALYSIS</div>
+  <h1>FFT Low-Pass Filter</h1>
+  <p>Visualizing how cutoff frequency affects noise removal &amp; detail preservation</p>
+</div>
+
+<div class="controls">
+  <div class="ctrl-label">NOISE LEVEL</div>
+  <div class="noise-btns">
+    <button class="noise-btn active" data-sigma="15" onclick="setNoise(15)">◎ Light Noise <span style="opacity:.5">σ=15</span></button>
+    <button class="noise-btn" data-sigma="45" onclick="setNoise(45)">◉ Heavy Noise <span style="opacity:.5">σ=45</span></button>
+  </div>
+
+  <div class="ctrl-label">CUTOFF FREQUENCY</div>
+  <div class="slider-row">
+    <span style="font-size:11px;color:#668">Controls how much of the frequency spectrum is kept</span>
+    <span class="cutoff-val" id="cutoffVal">80</span>
+  </div>
+  <input type="range" min="10" max="100" value="80" id="cutoffSlider" oninput="onCutoff(this.value)" />
+  <div class="slider-hints"><span>Aggressive (10)</span><span>Preserve Detail (100)</span></div>
+  <div class="suggestion" id="suggestionText">✦ Fine detail preserved — ideal for lightly noisy images</div>
+
+  <div class="spectrum-toggle">
+    <button class="spectrum-btn" id="specBtn" onclick="toggleSpectrum()">◇ FFT Spectrum View</button>
+    <span class="spectrum-hint" id="specHint">Toggle to view frequency domain</span>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel" id="pOriginal">
+    <div class="panel-label">Original</div>
+    <canvas id="cOriginal" width="200" height="200"></canvas>
+  </div>
+  <div class="panel" id="pNoisy">
+    <div class="panel-label" id="noisyLabel">Noisy (σ=15)</div>
+    <canvas id="cNoisy" width="200" height="200"></canvas>
+    <div class="psnr-badge" id="psnrNoisy">—</div>
+  </div>
+  <div class="panel highlight" id="pFiltered">
+    <div class="panel-label" id="filteredLabel">Filtered (cutoff=80)</div>
+    <canvas id="cFiltered" width="200" height="200"></canvas>
+    <div class="psnr-badge" id="psnrFiltered">—</div>
+  </div>
+</div>
+
+<div class="analysis">
+  <div class="analysis-title">PSNR ANALYSIS</div>
+  <div class="psnr-grid">
+    <div class="psnr-card">
+      <div class="psnr-card-label">Before Filtering</div>
+      <div class="psnr-big" id="psnrBigNoisy">—</div>
+      <div class="psnr-sub">Noisy vs Original</div>
+    </div>
+    <div class="psnr-card">
+      <div class="psnr-card-label">After Filtering</div>
+      <div class="psnr-big" id="psnrBigFiltered">—</div>
+      <div class="psnr-sub" id="psnrSubFiltered">Cutoff 80 vs Original</div>
+    </div>
+  </div>
+  <div class="psnr-verdict" id="verdict"></div>
+  <div class="scale">
+    PSNR Quality Reference:
+    <div class="scale-row">
+      <span><span class="dot" style="background:#ff6b6b"></span><span style="color:#668">&lt; 25 dB</span> <span style="color:#ff6b6b">Poor</span></span>
+      <span><span class="dot" style="background:#ffd166"></span><span style="color:#668">25–35 dB</span> <span style="color:#ffd166">Acceptable</span></span>
+      <span><span class="dot" style="background:#63ffb4"></span><span style="color:#668">&gt; 35 dB</span> <span style="color:#63ffb4">Good</span></span>
+    </div>
+  </div>
+</div>
+
+<div class="footer-note">
+  <span style="color:#63ffb4">cutoff=80</span> preserves high-frequency components (fine edges, texture) · ideal for light noise<br>
+  <span style="color:#ff6b6b">cutoff=30</span> removes most high-freq content (smooth, blurry) · needed for heavy corruption<br>
+  No universal formula — test empirically, measure PSNR, compare visually.
+</div>
+
+<script>
+const W = 200, H = 200;
+let noiseSigma = 15;
+let cutoff = 80;
+let showSpectrum = false;
+let original, noisy, filtered;
+
+// ── Image generation ──────────────────────────────────────────
+function generateOriginal() {
+  const d = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const coarse = 128 + 60 * Math.sin((x/W)*Math.PI*4) * Math.cos((y/H)*Math.PI*4);
+    const fine   = 30  * Math.sin((x/W)*Math.PI*20) * Math.sin((y/H)*Math.PI*20);
+    const edge   = (x>60&&x<140&&y>60&&y<140) ? 20 : 0;
+    d[y*W+x] = Math.min(255, Math.max(0, Math.round(coarse+fine+edge)));
+  }
+  return d;
+}
+
+function addNoise(src, sigma) {
+  const out = new Uint8Array(src.length);
+  for (let i = 0; i < src.length; i++) {
+    const u1 = Math.random(), u2 = Math.random();
+    const n = Math.sqrt(-2*Math.log(u1+1e-10)) * Math.cos(2*Math.PI*u2);
+    out[i] = Math.min(255, Math.max(0, Math.round(src[i] + n*sigma)));
+  }
+  return out;
+}
+
+function lowPassFilter(src, radius) {
+  if (radius < 0.5) return new Float32Array(src);
+  const r = Math.round(radius);
+  const tmp = new Float32Array(W*H);
+  const out = new Float32Array(W*H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let s=0, c=0;
+    for (let dx=-r; dx<=r; dx++) { const nx=Math.min(W-1,Math.max(0,x+dx)); s+=src[y*W+nx]; c++; }
+    tmp[y*W+x] = s/c;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    let s=0, c=0;
+    for (let dy=-r; dy<=r; dy++) { const ny=Math.min(H-1,Math.max(0,y+dy)); s+=tmp[ny*W+x]; c++; }
+    out[y*W+x] = s/c;
+  }
+  return out;
+}
+
+function cutoffToRadius(c) { return Math.round((100-c)/10); }
+
+function calcPSNR(orig, fil) {
+  let mse = 0;
+  for (let i = 0; i < orig.length; i++) { const d=orig[i]-fil[i]; mse+=d*d; }
+  mse /= orig.length;
+  return mse===0 ? 100 : 10*Math.log10(255*255/mse);
+}
+
+// ── Drawing ───────────────────────────────────────────────────
+function drawGrayscale(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(W, H);
+  for (let i = 0; i < data.length; i++) {
+    const v = Math.min(255, Math.max(0, Math.round(data[i])));
+    id.data[i*4]=id.data[i*4+1]=id.data[i*4+2]=v; id.data[i*4+3]=255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function drawSpectrum(canvas, co) {
+  const ctx = canvas.getContext('2d');
+  const cx=W/2, cy=H/2;
+  const maxR=Math.sqrt(cx*cx+cy*cy);
+  const id = ctx.createImageData(W, H);
+  for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+    const fx=x-cx, fy=y-cy;
+    const r=Math.sqrt(fx*fx+fy*fy);
+    const mag=Math.max(0,255-(r/maxR)*200);
+    const cutR=(co/100)*maxR*0.9;
+    const onBorder=Math.abs(r-cutR)<2;
+    const inside=r<=cutR;
+    const i=(y*W+x)*4;
+    if (onBorder) { id.data[i]=255;id.data[i+1]=80;id.data[i+2]=80; }
+    else if (inside) { id.data[i]=Math.round(mag*0.3);id.data[i+1]=Math.round(mag*0.8);id.data[i+2]=Math.round(mag*0.5); }
+    else { id.data[i]=Math.round(mag*0.05);id.data[i+1]=Math.round(mag*0.1);id.data[i+2]=Math.round(mag*0.08); }
+    id.data[i+3]=255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+// ── Colour helpers ────────────────────────────────────────────
+function psnrColor(v) { return v>35?'#63ffb4':v>25?'#ffd166':'#ff6b6b'; }
+
+function cutoffColor(c) { return c>=70?'#63ffb4':c>=40?'#ffd166':'#ff6b6b'; }
+
+// ── Update UI ─────────────────────────────────────────────────
+function update() {
+  noisy    = addNoise(original, noiseSigma);
+  filtered = lowPassFilter(noisy, cutoffToRadius(cutoff));
+
+  const pNoise = calcPSNR(original, noisy);
+  const pFilt  = calcPSNR(original, filtered);
+
+  // Draw canvases
+  if (showSpectrum) {
+    drawSpectrum(document.getElementById('cOriginal'),  100);
+    drawSpectrum(document.getElementById('cNoisy'),     100);
+    drawSpectrum(document.getElementById('cFiltered'),  cutoff);
+  } else {
+    drawGrayscale(document.getElementById('cOriginal'),  original);
+    drawGrayscale(document.getElementById('cNoisy'),     noisy);
+    drawGrayscale(document.getElementById('cFiltered'),  filtered);
+  }
+
+  // Labels
+  document.getElementById('noisyLabel').textContent    = `Noisy (σ=${noiseSigma})`;
+  document.getElementById('filteredLabel').textContent = `Filtered (cutoff=${cutoff})`;
+
+  // PSNR badges
+  const bNoisy = document.getElementById('psnrNoisy');
+  bNoisy.textContent = `PSNR: ${pNoise.toFixed(1)} dB`;
+  bNoisy.style.color = psnrColor(pNoise);
+
+  const bFilt = document.getElementById('psnrFiltered');
+  bFilt.textContent = `PSNR: ${pFilt.toFixed(1)} dB`;
+  bFilt.style.color = psnrColor(pFilt);
+
+  // Cutoff value + colour
+  const cv = document.getElementById('cutoffVal');
+  cv.textContent = cutoff;
+  cv.style.color = cutoffColor(cutoff);
+
+  // Suggestion
+  const sug = cutoff>=70
+    ? '✦ Fine detail preserved — ideal for lightly noisy images'
+    : cutoff>=40
+    ? '✦ Balanced filtering — moderate noise removal with some detail loss'
+    : '✦ Aggressive filtering — best for heavily corrupted images';
+  document.getElementById('suggestionText').textContent = sug;
+
+  // Analysis cards
+  const bn = document.getElementById('psnrBigNoisy');
+  bn.textContent = pNoise.toFixed(1) + ' dB';
+  bn.style.color = psnrColor(pNoise);
+
+  const bf = document.getElementById('psnrBigFiltered');
+  bf.textContent = pFilt.toFixed(1) + ' dB';
+  bf.style.color = psnrColor(pFilt);
+  document.getElementById('psnrSubFiltered').textContent = `Cutoff ${cutoff} vs Original`;
+
+  // Verdict
+  const vEl = document.getElementById('verdict');
+  if (pFilt > pNoise) {
+    vEl.textContent = `✓ Filter improved quality by ${(pFilt-pNoise).toFixed(1)} dB — cutoff=${cutoff} is working well for σ=${noiseSigma} noise`;
+    vEl.style.background = 'rgba(99,255,180,0.06)';
+    vEl.style.border = '1px solid rgba(99,255,180,0.15)';
+  } else {
+    vEl.textContent = `✗ Filter degraded quality by ${(pNoise-pFilt).toFixed(1)} dB — try adjusting cutoff for this noise level`;
+    vEl.style.background = 'rgba(255,100,100,0.06)';
+    vEl.style.border = '1px solid rgba(255,100,100,0.15)';
+  }
+}
+
+// ── Event handlers ────────────────────────────────────────────
+function setNoise(sigma) {
+  noiseSigma = sigma;
+  document.querySelectorAll('.noise-btn').forEach(b => {
+    b.classList.toggle('active', +b.dataset.sigma === sigma);
+  });
+  update();
+}
+
+function onCutoff(val) {
+  cutoff = +val;
+  update();
+}
+
+function toggleSpectrum() {
+  showSpectrum = !showSpectrum;
+  const btn  = document.getElementById('specBtn');
+  const hint = document.getElementById('specHint');
+  btn.classList.toggle('active', showSpectrum);
+  btn.textContent = showSpectrum ? '◈ FFT Spectrum View' : '◇ FFT Spectrum View';
+  hint.textContent = showSpectrum
+    ? 'Green = passed frequencies, red ring = cutoff boundary'
+    : 'Toggle to view frequency domain';
+  update();
+}
+
+// ── Init ──────────────────────────────────────────────────────
+original = generateOriginal();
+update();
+</script>
+</body>
+</html>

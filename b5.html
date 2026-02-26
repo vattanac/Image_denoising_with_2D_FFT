@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Element-wise Multiplication</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+    padding: 24px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: #fff;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 0.82rem;
+    color: #8b949e;
+    margin-bottom: 28px;
+  }
+
+  /* Controls */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    justify-content: center;
+    margin-bottom: 28px;
+  }
+  .ctrl-group {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 12px 18px;
+    min-width: 180px;
+  }
+  .ctrl-group label {
+    font-size: 0.75rem;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #c9d1d9;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .btn:hover { background: #30363d; }
+  .btn.active { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+
+  input[type=range] {
+    width: 130px;
+    accent-color: #1f6feb;
+    vertical-align: middle;
+  }
+  .range-val {
+    font-size: 0.8rem;
+    color: #58a6ff;
+    margin-left: 8px;
+  }
+
+  /* Main grid */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .stage-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #8b949e;
+    text-align: center;
+  }
+  .stage-label {
+    font-size: 0.68rem;
+    color: #58a6ff;
+    text-align: center;
+    font-family: monospace;
+  }
+  canvas {
+    border-radius: 8px;
+    display: block;
+  }
+
+  /* Operator */
+  .operator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    color: #f0883e;
+    font-weight: 700;
+    padding: 0 10px;
+    padding-top: 36px;
+  }
+
+  /* Frequency bins legend */
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 0.75rem; color: #8b949e;
+  }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+
+  /* Info box */
+  .info-box {
+    max-width: 700px;
+    margin: 22px auto 0;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 10px;
+    padding: 16px 20px;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    color: #c9d1d9;
+  }
+  .info-box strong { color: #58a6ff; }
+  .highlight { color: #3fb950; font-weight: 600; }
+  .suppress { color: #f85149; font-weight: 600; }
+  .eq { color: #f0883e; font-weight: 700; font-size: 1em; }
+
+  .arrow-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0;
+    flex-wrap: wrap;
+  }
+</style>
+</head>
+<body>
+
+<h1>FFT Element-wise Multiplication — Frequency Filtering</h1>
+<p class="subtitle">How a mask passes or suppresses frequency components to remove noise</p>
+
+<div class="controls">
+  <div class="ctrl-group">
+    <label>Filter Type</label>
+    <div class="btn-group">
+      <button class="btn active" id="btn-lp" onclick="setFilter('lowpass')">Low-pass</button>
+      <button class="btn" id="btn-hp" onclick="setFilter('highpass')">High-pass</button>
+      <button class="btn" id="btn-bp" onclick="setFilter('bandpass')">Band-pass</button>
+    </div>
+  </div>
+  <div class="ctrl-group">
+    <label>Cutoff Frequency</label>
+    <input type="range" id="cutoff" min="1" max="15" value="6" oninput="updateViz()">
+    <span class="range-val" id="cutoff-val">6</span>
+  </div>
+  <div class="ctrl-group">
+    <label>Noise Level</label>
+    <input type="range" id="noise" min="0" max="10" value="5" oninput="updateViz()">
+    <span class="range-val" id="noise-val">5</span>
+  </div>
+  <div class="ctrl-group">
+    <label>Animate</label>
+    <div class="btn-group">
+      <button class="btn active" id="btn-anim" onclick="toggleAnim()">▶ Play</button>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-row pipeline">
+  <!-- FFT Spectrum -->
+  <div class="stage">
+    <div class="stage-title">FFT Spectrum</div>
+    <canvas id="c-fft" width="200" height="160"></canvas>
+    <div class="stage-label">F(ω)</div>
+  </div>
+
+  <div class="operator">×</div>
+
+  <!-- Mask -->
+  <div class="stage">
+    <div class="stage-title">Filter Mask</div>
+    <canvas id="c-mask" width="200" height="160"></canvas>
+    <div class="stage-label">H(ω)</div>
+  </div>
+
+  <div class="operator">=</div>
+
+  <!-- Result Spectrum -->
+  <div class="stage">
+    <div class="stage-title">Filtered Spectrum</div>
+    <canvas id="c-result" width="200" height="160"></canvas>
+    <div class="stage-label">F(ω) · H(ω)</div>
+  </div>
+</div>
+
+<!-- Per-bin animation -->
+<div style="max-width:640px; margin: 22px auto 0;">
+  <div class="stage-title" style="margin-bottom:8px; text-align:center;">Bin-by-bin multiplication (hover to inspect)</div>
+  <canvas id="c-bins" width="620" height="110" style="width:100%;border-radius:8px;cursor:crosshair;"></canvas>
+</div>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div>Signal freq</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div>Noise freq</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div>Mask ≈ 1 (pass)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#6e7681"></div>Mask ≈ 0 (block)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f0883e"></div>Output</div>
+</div>
+
+<div class="info-box" id="info-box">
+  Hover a frequency bin above to see what happens during element-wise multiplication.
+  <br><br>
+  <strong>Key idea:</strong> Each frequency bin is multiplied independently.
+  <span class="highlight">Mask ≈ 1 → frequency passes through unchanged.</span>
+  <span class="suppress">Mask ≈ 0 → frequency is zeroed out (noise removed).</span>
+</div>
+
+<script>
+const N = 32; // number of frequency bins
+let filterType = 'lowpass';
+let animRunning = true;
+let animFrame = 0;
+let animId = null;
+let hoveredBin = -1;
+
+function setFilter(f) {
+  filterType = f;
+  document.querySelectorAll('.btn').forEach(b => {
+    if(b.id === 'btn-lp' || b.id === 'btn-hp' || b.id === 'btn-bp') b.classList.remove('active');
+  });
+  document.getElementById('btn-' + (f==='lowpass'?'lp':f==='highpass'?'hp':'bp')).classList.add('active');
+  updateViz();
+}
+
+function toggleAnim() {
+  animRunning = !animRunning;
+  document.getElementById('btn-anim').textContent = animRunning ? '⏸ Pause' : '▶ Play';
+  if(animRunning) loop();
+}
+
+function getMask(cutoff) {
+  const mask = new Float32Array(N);
+  const bw = 3;
+  for(let i=0;i<N;i++){
+    const f = i < N/2 ? i : N-i; // fold
+    if(filterType==='lowpass') {
+      mask[i] = 1/(1+Math.pow(f/cutoff,6));
+    } else if(filterType==='highpass') {
+      mask[i] = 1 - 1/(1+Math.pow(f/cutoff,6));
+    } else { // bandpass around cutoff
+      const lo = Math.max(cutoff-bw,0), hi = cutoff+bw;
+      mask[i] = (1/(1+Math.pow(f/hi,6))) * (1 - 1/(1+Math.pow(f/lo,6)));
+    }
+  }
+  return mask;
+}
+
+function getSpectrum(noiseLevel, t) {
+  const spec = new Float32Array(N);
+  // Signal: a few low-freq peaks
+  const sigFreqs = [2, 4, 6];
+  for(const sf of sigFreqs) {
+    const amp = 0.6 + 0.3*Math.sin(t * 0.04 + sf);
+    if(sf < N/2) { spec[sf] += amp; spec[N-sf] += amp*0.5; }
+  }
+  // Noise: high freq random-ish
+  const noiseFreqs = [10,13,15,18,20,22,25];
+  for(const nf of noiseFreqs) {
+    const amp = (noiseLevel/10) * (0.4 + 0.3*Math.sin(t*0.07 + nf*1.3));
+    if(nf < N) { spec[nf] += amp; if(N-nf < N) spec[N-nf] += amp*0.5; }
+  }
+  return spec;
+}
+
+function drawSpectrum(canvasId, spec, colorFn, title) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  // bg
+  ctx.fillStyle = '#161b22';
+  ctx.roundRect(0,0,W,H,8);
+  ctx.fill();
+
+  const pad = 16, bw = (W - pad*2) / (N/2);
+  const maxVal = 1.1;
+
+  for(let i=0;i<N/2;i++){
+    const x = pad + i*bw;
+    const barH = Math.max(2, (spec[i]/maxVal) * (H-pad*2));
+    const y = H - pad - barH;
+    const col = colorFn(i, spec[i]);
+    ctx.fillStyle = i === hoveredBin ? '#fff' : col;
+    ctx.beginPath();
+    ctx.roundRect(x+1, y, bw-2, barH, 2);
+    ctx.fill();
+  }
+
+  // x-axis
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, H-pad); ctx.lineTo(W-pad, H-pad); ctx.stroke();
+}
+
+function drawMask(cutoff) {
+  const mask = getMask(cutoff);
+  const canvas = document.getElementById('c-mask');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#161b22';
+  ctx.roundRect(0,0,W,H,8);
+  ctx.fill();
+
+  const pad = 16, bw = (W-pad*2)/(N/2);
+
+  // draw mask as smooth curve + bars
+  ctx.beginPath();
+  ctx.strokeStyle = '#3fb950';
+  ctx.lineWidth = 2;
+  for(let i=0;i<N/2;i++){
+    const x = pad + i*bw + bw/2;
+    const y = H - pad - mask[i]*(H-pad*2);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  for(let i=0;i<N/2;i++){
+    const x = pad + i*bw;
+    const barH = Math.max(1, mask[i]*(H-pad*2));
+    const y = H - pad - barH;
+    const alpha = mask[i];
+    ctx.fillStyle = i===hoveredBin
+      ? `rgba(255,255,255,0.9)`
+      : `rgba(63,185,80,${0.15+alpha*0.5})`;
+    ctx.beginPath();
+    ctx.roundRect(x+1, y, bw-2, barH, 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = '#30363d';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad,H-pad); ctx.lineTo(W-pad,H-pad); ctx.stroke();
+}
+
+function drawBins(spec, mask) {
+  const canvas = document.getElementById('c-bins');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#161b22';
+  ctx.roundRect(0,0,W,H,8);
+  ctx.fill();
+
+  const nBins = N/2;
+  const pad = 20;
+  const bw = (W - pad*2) / nBins;
+  const rowH = (H - pad*2) / 3;
+
+  // Labels
+  const labels = ['F(ω)', 'H(ω)', 'Output'];
+  const colors = ['#58a6ff','#3fb950','#f0883e'];
+  for(let r=0;r<3;r++){
+    ctx.fillStyle = colors[r];
+    ctx.font = '10px monospace';
+    ctx.fillText(labels[r], 4, pad + r*rowH + rowH/2 + 3);
+  }
+
+  for(let i=0;i<nBins;i++){
+    const x = pad + i*bw;
+    const isHov = i===hoveredBin;
+    const isNoise = i >= 9;
+
+    // Row 0: FFT spec
+    const fH = Math.max(2, (spec[i]/1.1)*(rowH-6));
+    ctx.fillStyle = isHov ? '#fff' : (isNoise ? '#f85149' : '#58a6ff');
+    ctx.beginPath();
+    ctx.roundRect(x+1, pad + 0*rowH + (rowH-6-fH), bw-2, fH, 1);
+    ctx.fill();
+
+    // Row 1: Mask
+    const mH = Math.max(2, mask[i]*(rowH-6));
+    ctx.fillStyle = isHov ? '#fff' : (mask[i]>0.5 ? '#3fb950' : '#6e7681');
+    ctx.beginPath();
+    ctx.roundRect(x+1, pad + 1*rowH + (rowH-6-mH), bw-2, mH, 1);
+    ctx.fill();
+
+    // Row 2: Output
+    const out = spec[i] * mask[i];
+    const oH = Math.max(0, (out/1.1)*(rowH-6));
+    ctx.fillStyle = isHov ? '#fff' : '#f0883e';
+    ctx.globalAlpha = 0.3 + mask[i]*0.7;
+    ctx.beginPath();
+    ctx.roundRect(x+1, pad + 2*rowH + (rowH-6-oH), bw-2, Math.max(1,oH), 1);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Multiplication line
+    if(isHov) {
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3,3]);
+      ctx.beginPath();
+      ctx.moveTo(x+bw/2, pad);
+      ctx.lineTo(x+bw/2, H-pad);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // dividers between rows
+    if(i===0){
+      for(let r=1;r<3;r++){
+        ctx.strokeStyle='#30363d'; ctx.lineWidth=1;
+        ctx.beginPath();
+        ctx.moveTo(pad, pad+r*rowH-2);
+        ctx.lineTo(W-pad, pad+r*rowH-2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // bin freq labels (every 4)
+  ctx.fillStyle = '#6e7681';
+  ctx.font = '9px sans-serif';
+  for(let i=0;i<nBins;i+=4){
+    const x = pad + i*bw + bw/2;
+    ctx.fillText(i, x-3, H-3);
+  }
+}
+
+function updateInfoBox(spec, mask, bin) {
+  if(bin < 0) return;
+  const val = spec[bin];
+  const m = mask[bin];
+  const out = val * m;
+  const isNoise = bin >= 9;
+  const passBlock = m > 0.5;
+  document.getElementById('info-box').innerHTML = `
+    <strong>Bin ${bin} (freq = ${bin} Hz-units):</strong>
+    &nbsp; <span style="color:${isNoise?'#f85149':'#58a6ff'}">${isNoise?'🔴 Noise':'🔵 Signal'} component</span>
+    <br><br>
+    <code style="font-size:0.85em;">
+      F(${bin}) = <span style="color:#58a6ff">${val.toFixed(3)}</span>
+      &nbsp;<span class="eq">×</span>&nbsp;
+      H(${bin}) = <span style="color:${passBlock?'#3fb950':'#6e7681'}">${m.toFixed(3)}</span>
+      &nbsp;<span class="eq">=</span>&nbsp;
+      <span style="color:#f0883e">${out.toFixed(3)}</span>
+    </code>
+    <br><br>
+    ${passBlock
+      ? `<span class="highlight">✅ Mask ≈ 1 → This frequency PASSES THROUGH. Amplitude preserved (${(m*100).toFixed(0)}%).</span>`
+      : `<span class="suppress">🚫 Mask ≈ 0 → This frequency is SUPPRESSED. Amplitude reduced to ${(m*100).toFixed(0)}%. Noise removed.</span>`
+    }
+  `;
+}
+
+function updateViz() {
+  const cutoff = parseInt(document.getElementById('cutoff').value);
+  const noiseLevel = parseInt(document.getElementById('noise').value);
+  document.getElementById('cutoff-val').textContent = cutoff;
+  document.getElementById('noise-val').textContent = noiseLevel;
+
+  const spec = getSpectrum(noiseLevel, animFrame);
+  const mask = getMask(cutoff);
+  const result = new Float32Array(N);
+  for(let i=0;i<N;i++) result[i] = spec[i]*mask[i];
+
+  const isNoise = (i) => i >= 9;
+  drawSpectrum('c-fft', spec, (i, v) => isNoise(i) ? '#f85149' : '#58a6ff');
+  drawMask(cutoff);
+  drawSpectrum('c-result', result, (i, v) => {
+    const col = isNoise(i) ? '#f85149' : '#58a6ff';
+    const out = result[i]; const orig = spec[i];
+    const suppressed = orig > 0.05 && out < orig*0.3;
+    return suppressed ? '#6e7681' : '#f0883e';
+  });
+  drawBins(spec, mask);
+
+  if(hoveredBin >= 0) updateInfoBox(spec, mask, hoveredBin);
+}
+
+function loop() {
+  if(!animRunning) return;
+  animFrame++;
+  updateViz();
+  animId = requestAnimationFrame(loop);
+}
+
+// Bin hover interaction
+document.getElementById('c-bins').addEventListener('mousemove', function(e) {
+  const rect = this.getBoundingClientRect();
+  const x = (e.clientX - rect.left) * (this.width / rect.width);
+  const pad = 20, nBins = N/2;
+  const bw = (this.width - pad*2) / nBins;
+  const bin = Math.floor((x - pad) / bw);
+  if(bin >= 0 && bin < nBins) {
+    hoveredBin = bin;
+    const cutoff = parseInt(document.getElementById('cutoff').value);
+    const noiseLevel = parseInt(document.getElementById('noise').value);
+    const spec = getSpectrum(noiseLevel, animFrame);
+    const mask = getMask(cutoff);
+    updateInfoBox(spec, mask, bin);
+    updateViz();
+  }
+});
+document.getElementById('c-bins').addEventListener('mouseleave', function() {
+  hoveredBin = -1;
+  document.getElementById('info-box').innerHTML = `
+    Hover a frequency bin above to see what happens during element-wise multiplication.
+    <br><br>
+    <strong>Key idea:</strong> Each frequency bin is multiplied independently.
+    <span class="highlight">Mask ≈ 1 → frequency passes through unchanged.</span>
+    <span class="suppress">Mask ≈ 0 → frequency is zeroed out (noise removed).</span>
+  `;
+  updateViz();
+});
+
+// Init
+updateViz();
+loop();
+</script>
+</body>
+</html>

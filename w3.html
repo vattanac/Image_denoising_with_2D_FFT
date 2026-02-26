@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Why Grayscale? — Concept Note</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Literata:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0d0f1a;
+    --card: #141828;
+    --card2: #1a2035;
+    --accent: #5bf0c8;
+    --accent2: #ff6b6b;
+    --accent3: #ffc857;
+    --accent4: #74b9ff;
+    --text: #f5f7ff;
+    --muted: #b8c6de;
+    --border: rgba(91,240,200,0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Literata', Georgia, serif;
+    font-size: 16px;
+    line-height: 1.8;
+    padding: 40px 24px 60px;
+  }
+
+  .container { max-width: 680px; margin: 0 auto; }
+
+  .label {
+    display: inline-block;
+    background: rgba(116,185,255,0.12);
+    color: var(--accent4);
+    border: 1px solid rgba(116,185,255,0.3);
+    padding: 3px 14px;
+    border-radius: 100px;
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: var(--text);
+    margin-bottom: 6px;
+    line-height: 1.3;
+  }
+
+  h1 span { color: var(--accent); }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 0.95rem;
+    margin-bottom: 36px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin-bottom: 16px;
+  }
+
+  .card p { color: var(--muted); margin-top: 10px; }
+  .card p:first-child { margin-top: 0; }
+  .card strong { color: var(--text); }
+
+  .highlight {
+    background: rgba(91,240,200,0.07);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    color: var(--muted);
+  }
+  .highlight strong { color: var(--accent); }
+
+  .danger {
+    background: rgba(255,107,107,0.07);
+    border-left: 3px solid var(--accent2);
+    border-radius: 0 10px 10px 0;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    color: var(--muted);
+  }
+  .danger strong { color: var(--accent2); }
+
+  .callout {
+    background: rgba(255,200,87,0.07);
+    border: 1px solid rgba(255,200,87,0.2);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    color: var(--muted);
+  }
+  .callout .callout-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent3);
+    margin-bottom: 8px;
+  }
+
+  .reasons {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .reason-box {
+    background: var(--card2);
+    border-radius: 12px;
+    padding: 18px 22px;
+    border: 1px solid var(--border);
+    display: flex;
+    gap: 18px;
+    align-items: flex-start;
+  }
+
+  .reason-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 800;
+    color: var(--accent);
+    background: rgba(91,240,200,0.12);
+    border: 1px solid rgba(91,240,200,0.3);
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .reason-body { flex: 1; }
+  .reason-body strong {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.93rem;
+    color: var(--text);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .reason-body p { color: var(--muted); font-size: 0.91rem; line-height: 1.7; }
+
+  .rgb-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .rgb-box {
+    background: var(--card2);
+    border-radius: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+
+  .rgb-box .ch-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .rgb-box.red .ch-label   { color: var(--accent2); }
+  .rgb-box.green .ch-label { color: var(--accent); }
+  .rgb-box.blue .ch-label  { color: var(--accent4); }
+  .rgb-box.gray .ch-label  { color: var(--accent3); }
+
+  .rgb-box .ch-val {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .rgb-box p {
+    color: var(--muted);
+    font-size: 0.75rem;
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+
+  .pipeline {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin-bottom: 16px;
+  }
+
+  .pipeline .pipe-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent4);
+    margin-bottom: 16px;
+  }
+
+  .pipe-steps {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pipe-step {
+    background: var(--card2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-align: center;
+  }
+
+  .pipe-step span {
+    display: block;
+    font-family: 'Syne', sans-serif;
+    font-size: 0.75rem;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+
+  .pipe-arrow {
+    color: rgba(255,255,255,0.2);
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+
+  .formula-box {
+    background: rgba(116,185,255,0.06);
+    border: 1px solid rgba(116,185,255,0.2);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+
+  .formula-box .f-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent4);
+    margin-bottom: 10px;
+  }
+
+  .formula-box .formula {
+    font-family: 'Courier New', monospace;
+    font-size: 1rem;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .formula-box p {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+
+  .summary {
+    background: linear-gradient(135deg, rgba(91,240,200,0.08), rgba(116,185,255,0.06));
+    border: 1px solid rgba(91,240,200,0.2);
+    border-radius: 14px;
+    padding: 22px 26px;
+    margin-bottom: 16px;
+  }
+  .summary .summary-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+  .summary p { color: var(--muted); }
+  .summary p + p { margin-top: 8px; }
+
+  code {
+    background: rgba(91,240,200,0.1);
+    color: var(--accent);
+    padding: 2px 7px;
+    border-radius: 5px;
+    font-size: 0.88em;
+    font-family: 'Courier New', monospace;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="label">Concept Note</div>
+  <h1>Why Work on <span>Grayscale</span> Images?</h1>
+  <p class="subtitle">Simplicity, speed, and the nature of noise itself</p>
+
+  <div class="reasons">
+    <div class="reason-box">
+      <div class="reason-num">1</div>
+      <div class="reason-body">
+        <strong>FFT requires a 2D matrix</strong>
+        <p><code>np.fft.fft2()</code> takes a single 2D array as input. A grayscale image is exactly that — one number per pixel arranged in rows and columns. A color (RGB) image is a 3D array (height × width × 3 channels), which FFT cannot directly process. Converting to grayscale collapses it to the shape FFT needs.</p>
+      </div>
+    </div>
+    <div class="reason-box">
+      <div class="reason-num">2</div>
+      <div class="reason-body">
+        <strong>Noise is a brightness problem, not a color problem</strong>
+        <p>Gaussian noise manifests as random fluctuations in pixel <em>intensity</em>. It doesn't selectively corrupt red but not blue — it corrupts brightness uniformly. Grayscale captures brightness directly, so denoising in grayscale attacks exactly what noise is doing. Bringing color into it adds complexity without improving the core result.</p>
+      </div>
+    </div>
+    <div class="reason-box">
+      <div class="reason-num">3</div>
+      <div class="reason-body">
+        <strong>Frequency analysis is about intensity patterns</strong>
+        <p>What FFT analyzes is <em>how rapidly brightness changes</em> across the image — smooth gradients are low frequency, sharp edges are high frequency, random noise spikes are very high frequency. This entire concept is defined in terms of brightness variation. Color information (hue, saturation) is irrelevant to that analysis.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="rgb-grid">
+    <div class="rgb-box red">
+      <div class="ch-label">Red</div>
+      <div class="ch-val">2D</div>
+      <p>One grid of red values</p>
+    </div>
+    <div class="rgb-box green">
+      <div class="ch-label">Green</div>
+      <div class="ch-val">2D</div>
+      <p>One grid of green values</p>
+    </div>
+    <div class="rgb-box blue">
+      <div class="ch-label">Blue</div>
+      <div class="ch-val">2D</div>
+      <p>One grid of blue values</p>
+    </div>
+    <div class="rgb-box gray">
+      <div class="ch-label">Grayscale</div>
+      <div class="ch-val">2D</div>
+      <p>One grid — FFT-ready</p>
+    </div>
+  </div>
+
+  <div class="formula-box">
+    <div class="f-label">RGB → Grayscale conversion formula</div>
+    <div class="formula">Gray = 0.299·R + 0.587·G + 0.114·B</div>
+    <p>Green is weighted highest because the human eye is most sensitive to green light. This is the standard ITU-R BT.601 formula used by <code>cv2.cvtColor()</code> and most image libraries.</p>
+  </div>
+
+  <div class="highlight">
+    <strong>This is not a limitation — it's the correct approach.</strong> Even in professional pipelines, FFT-based denoising is always applied to the brightness channel. Color channels are handled separately or left untouched because they carry far less noise.
+  </div>
+
+  <div class="card">
+    <p><strong>What about color images in practice?</strong></p>
+    <p>You don't ignore color — you handle it properly by converting to a color space that separates brightness from color, then denoise only the brightness channel.</p>
+  </div>
+
+  <div class="pipeline">
+    <div class="pipe-label">🎨 Color image denoising pipeline</div>
+    <div class="pipe-steps">
+      <div class="pipe-step"><span>Step 1</span>RGB Image</div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><span>Step 2</span>Convert to YCbCr</div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><span>Step 3</span>FFT denoise Y only<br><small style="color:var(--accent)">(brightness)</small></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><span>Step 4</span>Leave Cb, Cr<br><small style="color:var(--muted)">(color — untouched)</small></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step"><span>Step 5</span>Convert back to RGB</div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <div class="callout-label">💡 Key insight</div>
+    The Y channel in YCbCr <em>is</em> effectively grayscale — it represents luminance only. So the grayscale approach in this project is not a simplification. It is the correct foundational technique that scales directly to color images.
+  </div>
+
+  <div class="summary">
+    <div class="summary-label">✦ Bottom Line</div>
+    <p><strong>Grayscale = one 2D grid</strong>, which is exactly what FFT needs. RGB = three 2D grids, which FFT cannot process directly.</p>
+    <p>Noise lives in brightness, not color. FFT analyzes brightness patterns. Working in grayscale is not a workaround — it's the right tool for the job.</p>
+    <p>For color images, the same approach applies: convert to YCbCr, denoise the Y (brightness) channel with FFT, leave color channels untouched, convert back.</p>
+  </div>
+
+</div>
+</body>
+</html>

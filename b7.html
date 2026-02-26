@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT · IFFT2 Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #060a10;
+    --panel: #0c1118;
+    --border: #1a2535;
+    --accent: #00e5ff;
+    --accent2: #ff3d71;
+    --accent3: #a78bfa;
+    --text: #c8d8e8;
+    --dim: #4a6070;
+    --glow: 0 0 20px rgba(0,229,255,0.3);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+  }
+
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--accent), var(--accent3));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  header p {
+    margin-top: 10px;
+    color: var(--dim);
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .code-badge {
+    display: inline-block;
+    margin-top: 14px;
+    padding: 6px 16px;
+    background: rgba(0,229,255,0.08);
+    border: 1px solid rgba(0,229,255,0.25);
+    border-radius: 4px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+  }
+
+  /* Pipeline */
+  .pipeline {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin-bottom: 40px;
+    position: relative;
+  }
+
+  .pipeline::before {
+    content: '';
+    position: absolute;
+    top: 80px;
+    left: 12.5%;
+    width: 75%;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent3), var(--accent2));
+    z-index: 0;
+  }
+
+  .stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+    z-index: 1;
+    padding: 0 8px;
+    cursor: pointer;
+  }
+
+  .stage-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid var(--accent);
+    background: var(--bg);
+    box-shadow: var(--glow);
+    margin-bottom: 16px;
+    transition: transform 0.2s;
+  }
+
+  .stage:hover .stage-dot { transform: scale(1.4); }
+  .stage.active .stage-dot { background: var(--accent); }
+
+  .stage-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--dim);
+    text-align: center;
+    margin-bottom: 8px;
+    transition: color 0.2s;
+  }
+
+  .stage.active .stage-label { color: var(--accent); }
+
+  /* Canvas panels */
+  .panels {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .panel.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 24px rgba(0,229,255,0.15);
+  }
+
+  .panel-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .panel-num {
+    font-size: 0.65rem;
+    color: var(--accent);
+    opacity: 0.6;
+  }
+
+  .panel-title {
+    font-size: 0.72rem;
+    color: var(--text);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .panel canvas {
+    display: block;
+    width: 100%;
+    image-rendering: pixelated;
+  }
+
+  .panel-footer {
+    padding: 8px 14px;
+    font-size: 0.62rem;
+    color: var(--dim);
+    line-height: 1.5;
+    border-top: 1px solid var(--border);
+  }
+
+  .panel-footer span {
+    color: var(--accent3);
+  }
+
+  /* Controls */
+  .controls {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 32px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 24px;
+  }
+
+  .ctrl-group label {
+    display: block;
+    font-size: 0.68rem;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+
+  .ctrl-group label b { color: var(--accent); font-weight: 700; }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(0,229,255,0.5);
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    padding: 8px 16px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button.active { background: rgba(0,229,255,0.15); border-color: var(--accent); color: var(--accent); }
+
+  /* Info box */
+  .info-box {
+    background: rgba(0,229,255,0.04);
+    border: 1px solid rgba(0,229,255,0.2);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+
+  .info-box h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 0.85rem;
+    color: var(--accent);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  .info-box p {
+    font-size: 0.73rem;
+    line-height: 1.8;
+    color: var(--dim);
+    max-width: 900px;
+  }
+
+  .info-box code {
+    background: rgba(167,139,250,0.15);
+    color: var(--accent3);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+  }
+
+  /* Complex output breakdown */
+  .complex-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .complex-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .complex-card-header {
+    padding: 8px 14px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .complex-card.real .complex-card-header { color: var(--accent); }
+  .complex-card.imag .complex-card-header { color: var(--accent2); }
+
+  .complex-card canvas {
+    display: block;
+    width: 100%;
+    image-rendering: pixelated;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .stat-label { font-size: 0.6rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+  .stat-value { font-family: 'Syne', sans-serif; font-size: 1.1rem; font-weight: 800; color: var(--accent); }
+
+  @media (max-width: 768px) {
+    .pipeline, .panels { grid-template-columns: repeat(2, 1fr); }
+    .controls { grid-template-columns: 1fr; }
+    .complex-grid { grid-template-columns: 1fr; }
+    .stat-row { grid-template-columns: repeat(2, 1fr); }
+    .pipeline::before { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <header>
+    <h1>FFT ↔ IFFT2 Visualizer</h1>
+    <p>2D Fast Fourier Transform · Frequency Space · Complex Array Output</p>
+    <div class="code-badge">np.fft.ifft2() → complex-valued array</div>
+  </header>
+
+  <!-- Pipeline indicator -->
+  <div class="pipeline">
+    <div class="stage active" id="s0">
+      <div class="stage-dot"></div>
+      <div class="stage-label">Pixel Space</div>
+    </div>
+    <div class="stage" id="s1">
+      <div class="stage-dot"></div>
+      <div class="stage-label">FFT2 →<br>Freq Space</div>
+    </div>
+    <div class="stage" id="s2">
+      <div class="stage-dot"></div>
+      <div class="stage-label">Apply<br>Filter</div>
+    </div>
+    <div class="stage" id="s3">
+      <div class="stage-dot"></div>
+      <div class="stage-label">IFFT2 →<br>Complex Out</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>Pattern · <b id="patternLabel">Checkerboard</b></label>
+      <div class="btn-row">
+        <button class="active" onclick="setPattern('checker', this)">Checker</button>
+        <button onclick="setPattern('stripes', this)">Stripes</button>
+        <button onclick="setPattern('circle', this)">Circle</button>
+        <button onclick="setPattern('noise', this)">Noise</button>
+        <button onclick="setPattern('cross', this)">Cross</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>Filter Type · <b id="filterLabel">Low-Pass</b></label>
+      <div class="btn-row">
+        <button class="active" onclick="setFilter('lowpass', this)">Low-Pass</button>
+        <button onclick="setFilter('highpass', this)">High-Pass</button>
+        <button onclick="setFilter('bandpass', this)">Band-Pass</button>
+        <button onclick="setFilter('none', this)">None</button>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <label>Filter Radius · <b id="radiusVal">40</b></label>
+      <input type="range" id="radiusSlider" min="5" max="90" value="40" oninput="onRadiusChange(this)">
+    </div>
+  </div>
+
+  <!-- Canvas Panels -->
+  <div class="panels">
+    <div class="panel active" id="p0">
+      <div class="panel-header">
+        <span class="panel-num">01</span>
+        <span class="panel-title">Original Image</span>
+      </div>
+      <canvas id="c0" width="128" height="128"></canvas>
+      <div class="panel-footer">Pixel-space input · <span>uint8 [0–255]</span></div>
+    </div>
+    <div class="panel" id="p1">
+      <div class="panel-header">
+        <span class="panel-num">02</span>
+        <span class="panel-title">FFT Magnitude</span>
+      </div>
+      <canvas id="c1" width="128" height="128"></canvas>
+      <div class="panel-footer">fftshift + log(1+|F|) · <span>freq domain</span></div>
+    </div>
+    <div class="panel" id="p2">
+      <div class="panel-header">
+        <span class="panel-num">03</span>
+        <span class="panel-title">Filtered Spectrum</span>
+      </div>
+      <canvas id="c2" width="128" height="128"></canvas>
+      <div class="panel-footer">Masked frequency data · <span>filter applied</span></div>
+    </div>
+    <div class="panel" id="p3">
+      <div class="panel-header">
+        <span class="panel-num">04</span>
+        <span class="panel-title">IFFT2 Output</span>
+      </div>
+      <canvas id="c3" width="128" height="128"></canvas>
+      <div class="panel-footer">np.real(ifft2) · <span>reconstructed</span></div>
+    </div>
+  </div>
+
+  <!-- Info box -->
+  <div class="info-box">
+    <h3>⟳ Why is the result complex-valued?</h3>
+    <p>
+      <code>np.fft.ifft2()</code> always returns a <strong>complex array</strong> of shape <code>(H, W)</code> with dtype <code>complex128</code>.
+      Even when the input is a real image, floating-point arithmetic in the FFT butterfly operations introduces tiny imaginary residuals.
+      To recover the image, take <code>np.real(result)</code> — the imaginary part should be near zero (≈ 1e-12) for unmodified spectra.
+      After filtering, imaginary residuals may be slightly larger but are still discarded.
+    </p>
+  </div>
+
+  <!-- Complex output breakdown -->
+  <div style="margin-bottom: 32px;">
+    <div style="font-family:'Syne',sans-serif;font-size:0.75rem;color:var(--dim);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:12px;">IFFT2 Complex Output Breakdown</div>
+    <div class="complex-grid">
+      <div class="complex-card real">
+        <div class="complex-card-header">Real Part · np.real(ifft2(...))</div>
+        <canvas id="cReal" width="256" height="128"></canvas>
+      </div>
+      <div class="complex-card imag">
+        <div class="complex-card-header">Imaginary Part · np.imag(ifft2(...)) [≈0 for real images]</div>
+        <canvas id="cImag" width="256" height="128"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stat-row">
+    <div class="stat">
+      <div class="stat-label">Array Shape</div>
+      <div class="stat-value" id="statShape">128×128</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">dtype</div>
+      <div class="stat-value">complex128</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Max |Imag|</div>
+      <div class="stat-value" id="statImag">~1e-12</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Freq Retained</div>
+      <div class="stat-value" id="statFreq">—%</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const N = 128;
+let currentPattern = 'checker';
+let currentFilter = 'lowpass';
+let filterRadius = 40;
+
+// ---- Generate source image ----
+function generateImage(pattern) {
+  const buf = new Float32Array(N * N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      switch(pattern) {
+        case 'checker': buf[i] = ((Math.floor(x/8) + Math.floor(y/8)) % 2) * 255; break;
+        case 'stripes': buf[i] = (Math.sin(x * 0.25) > 0) ? 255 : 0; break;
+        case 'circle': {
+          const dx = x - N/2, dy = y - N/2;
+          buf[i] = (Math.sqrt(dx*dx+dy*dy) < N/3) ? 200 : 30; break;
+        }
+        case 'noise': buf[i] = Math.random() * 255; break;
+        case 'cross': {
+          const cx = Math.abs(x - N/2), cy = Math.abs(y - N/2);
+          buf[i] = (cx < 8 || cy < 8) ? 255 : 0; break;
+        }
+      }
+    }
+  }
+  return buf;
+}
+
+// ---- DFT implementation (FFT via Cooley-Tukey for power of 2) ----
+function fft1d(re, im) {
+  const n = re.length;
+  if (n <= 1) return;
+  // Bit-reversal permutation
+  let j = 0;
+  for (let i = 1; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      [re[i], re[j]] = [re[j], re[i]];
+      [im[i], im[j]] = [im[j], im[i]];
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wRe = Math.cos(ang), wIm = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let curRe = 1, curIm = 0;
+      for (let k = 0; k < len/2; k++) {
+        const u = i + k, v = i + k + len/2;
+        const tRe = curRe * re[v] - curIm * im[v];
+        const tIm = curRe * im[v] + curIm * re[v];
+        re[v] = re[u] - tRe; im[v] = im[u] - tIm;
+        re[u] += tRe; im[u] += tIm;
+        const nr = curRe * wRe - curIm * wIm;
+        curIm = curRe * wIm + curIm * wRe;
+        curRe = nr;
+      }
+    }
+  }
+}
+
+function fft2d(imgData) {
+  const re = new Float64Array(N * N);
+  const im = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) re[i] = imgData[i];
+
+  // Row FFTs
+  const rowRe = new Float64Array(N), rowIm = new Float64Array(N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) { rowRe[x] = re[y*N+x]; rowIm[x] = im[y*N+x]; }
+    fft1d(rowRe, rowIm);
+    for (let x = 0; x < N; x++) { re[y*N+x] = rowRe[x]; im[y*N+x] = rowIm[x]; }
+  }
+  // Col FFTs
+  const colRe = new Float64Array(N), colIm = new Float64Array(N);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) { colRe[y] = re[y*N+x]; colIm[y] = im[y*N+x]; }
+    fft1d(colRe, colIm);
+    for (let y = 0; y < N; y++) { re[y*N+x] = colRe[y]; im[y*N+x] = colIm[y]; }
+  }
+  return { re, im };
+}
+
+function ifft2d(re, im) {
+  // Conjugate → FFT → Conjugate / N²
+  const cRe = re.slice(), cIm = new Float64Array(N * N);
+  for (let i = 0; i < N * N; i++) cIm[i] = -im[i];
+  const { re: fre, im: fim } = fft2d_raw(cRe, cIm);
+  const outRe = new Float64Array(N * N);
+  const outIm = new Float64Array(N * N);
+  const n2 = N * N;
+  for (let i = 0; i < n2; i++) {
+    outRe[i] = fre[i] / n2;
+    outIm[i] = -fim[i] / n2;
+  }
+  return { re: outRe, im: outIm };
+}
+
+function fft2d_raw(re, im) {
+  const oRe = re.slice(), oIm = im.slice();
+  const rowRe = new Float64Array(N), rowIm = new Float64Array(N);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) { rowRe[x] = oRe[y*N+x]; rowIm[x] = oIm[y*N+x]; }
+    fft1d(rowRe, rowIm);
+    for (let x = 0; x < N; x++) { oRe[y*N+x] = rowRe[x]; oIm[y*N+x] = rowIm[x]; }
+  }
+  const colRe = new Float64Array(N), colIm = new Float64Array(N);
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) { colRe[y] = oRe[y*N+x]; colIm[y] = oIm[y*N+x]; }
+    fft1d(colRe, colIm);
+    for (let y = 0; y < N; y++) { oRe[y*N+x] = colRe[y]; oIm[y*N+x] = colIm[y]; }
+  }
+  return { re: oRe, im: oIm };
+}
+
+// fftshift
+function fftshift(re, im) {
+  const sRe = new Float64Array(N * N), sIm = new Float64Array(N * N);
+  const h = N / 2;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const ny = (y + h) % N, nx = (x + h) % N;
+      sRe[ny * N + nx] = re[y * N + x];
+      sIm[ny * N + nx] = im[y * N + x];
+    }
+  }
+  return { re: sRe, im: sIm };
+}
+
+function ifftshift(re, im) {
+  return fftshift(re, im); // symmetric for even N
+}
+
+// ---- Build filter mask ----
+function buildMask(type, radius) {
+  const mask = new Float32Array(N * N);
+  const cx = N / 2, cy = N / 2;
+  let kept = 0;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const d = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+      let v = 0;
+      if (type === 'lowpass') v = d <= radius ? 1 : 0;
+      else if (type === 'highpass') v = d >= radius ? 1 : 0;
+      else if (type === 'bandpass') v = (d >= radius * 0.4 && d <= radius) ? 1 : 0;
+      else v = 1;
+      mask[y * N + x] = v;
+      kept += v;
+    }
+  }
+  return { mask, pct: (kept / (N * N) * 100).toFixed(1) };
+}
+
+// ---- Draw to canvas ----
+function drawGray(canvas, data, normalize = true) {
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(N, N);
+  let mn = Infinity, mx = -Infinity;
+  if (normalize) {
+    for (let i = 0; i < data.length; i++) { if (data[i] < mn) mn = data[i]; if (data[i] > mx) mx = data[i]; }
+  } else { mn = 0; mx = 255; }
+  const range = mx - mn || 1;
+  for (let i = 0; i < data.length; i++) {
+    const v = Math.round(((data[i] - mn) / range) * 255);
+    id.data[i*4] = v; id.data[i*4+1] = v; id.data[i*4+2] = v; id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function drawMagnitude(canvas, re, im) {
+  const mag = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) mag[i] = Math.log1p(Math.sqrt(re[i]**2 + im[i]**2));
+  drawGray(canvas, mag);
+}
+
+function drawMaskedMag(canvas, re, im, mask) {
+  const mag = new Float32Array(N * N);
+  for (let i = 0; i < N * N; i++) mag[i] = mask[i] * Math.log1p(Math.sqrt(re[i]**2 + im[i]**2));
+  drawGray(canvas, mag);
+}
+
+function drawWide(canvas, data, normalize = true) {
+  // Draw on a 256×128 canvas (double wide for better visibility)
+  const ctx = canvas.getContext('2d');
+  const id = ctx.createImageData(256, 128);
+  let mn = Infinity, mx = -Infinity;
+  for (let i = 0; i < data.length; i++) { if (data[i] < mn) mn = data[i]; if (data[i] > mx) mx = data[i]; }
+  const range = mx - mn || 1;
+  // Tile horizontally: left = normal, right = zoomed/same
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 256; x++) {
+      const srcX = x < 128 ? x : x - 128;
+      const v = Math.round(((data[y * N + srcX] - mn) / range) * 255);
+      const pi = (y * 256 + x) * 4;
+      id.data[pi] = v; id.data[pi+1] = v; id.data[pi+2] = v; id.data[pi+3] = 255;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
+  // Draw divider
+  ctx.strokeStyle = 'rgba(0,229,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(128, 128); ctx.stroke();
+  // Labels
+  ctx.font = '9px Space Mono, monospace';
+  ctx.fillStyle = 'rgba(0,229,255,0.5)';
+  ctx.fillText('np.real(ifft2(...))', 4, 12);
+  ctx.fillText('mirrored', 134, 12);
+}
+
+function maxAbs(arr) {
+  let m = 0;
+  for (let i = 0; i < arr.length; i++) if (Math.abs(arr[i]) > m) m = Math.abs(arr[i]);
+  return m;
+}
+
+// ---- Main update ----
+function update() {
+  // 1. Generate image
+  const img = generateImage(currentPattern);
+  drawGray(document.getElementById('c0'), img, false);
+
+  // 2. FFT2
+  const { re: fre, im: fim } = fft2d(img);
+
+  // Shift for display
+  const { re: sfre, im: sfim } = fftshift(fre, fim);
+  drawMagnitude(document.getElementById('c1'), sfre, sfim);
+
+  // 3. Apply filter (on shifted)
+  const { mask, pct } = buildMask(currentFilter, filterRadius);
+  const filtRe = sfre.slice(); const filtIm = sfim.slice();
+  for (let i = 0; i < N*N; i++) { filtRe[i] *= mask[i]; filtIm[i] *= mask[i]; }
+  drawMaskedMag(document.getElementById('c2'), filtRe, filtIm, mask);
+
+  // 4. IFFT2 (unshift first)
+  const { re: ufRe, im: ufIm } = ifftshift(filtRe, filtIm);
+  const { re: outRe, im: outIm } = ifft2d(ufRe, ufIm);
+
+  drawGray(document.getElementById('c3'), outRe);
+  drawWide(document.getElementById('cReal'), outRe);
+
+  // Imag part visualization
+  const cImag = document.getElementById('cImag');
+  const ctxI = cImag.getContext('2d');
+  const id = ctxI.createImageData(256, 128);
+  const mxI = maxAbs(outIm) || 1;
+  for (let y = 0; y < 128; y++) {
+    for (let x = 0; x < 256; x++) {
+      const srcX = x < 128 ? x : x - 128;
+      const v = outIm[y * N + srcX];
+      const norm = (v / mxI + 1) / 2;
+      const rv = Math.round(norm * 255 * (x < 128 ? 1 : 0.5));
+      const pi = (y * 256 + x) * 4;
+      // Colorize imaginary: positive = accent2, negative = accent3
+      if (v > 0) { id.data[pi] = rv; id.data[pi+1] = Math.round(rv*0.24); id.data[pi+2] = Math.round(rv*0.44); }
+      else { id.data[pi] = Math.round(rv*0.65); id.data[pi+1] = Math.round(rv*0.54); id.data[pi+2] = rv; }
+      id.data[pi+3] = 255;
+    }
+  }
+  ctxI.putImageData(id, 0, 0);
+  ctxI.strokeStyle = 'rgba(255,61,113,0.3)';
+  ctxI.lineWidth = 1;
+  ctxI.setLineDash([4, 4]);
+  ctxI.beginPath(); ctxI.moveTo(128, 0); ctxI.lineTo(128, 128); ctxI.stroke();
+  ctxI.font = '9px Space Mono, monospace';
+  ctxI.fillStyle = 'rgba(255,61,113,0.5)';
+  ctxI.fillText('np.imag(ifft2(...))', 4, 12);
+
+  // Stats
+  const maxImag = maxAbs(outIm);
+  document.getElementById('statImag').textContent = maxImag < 1e-8 ? '~1e-12' : maxImag.toExponential(1);
+  document.getElementById('statFreq').textContent = pct + '%';
+
+  // Animate pipeline stages
+  animatePipeline();
+}
+
+let pipeStep = 0;
+function animatePipeline() {
+  pipeStep = 0;
+  const stages = ['s0','s1','s2','s3'];
+  const panels = ['p0','p1','p2','p3'];
+  stages.forEach(s => document.getElementById(s).classList.remove('active'));
+  panels.forEach(p => document.getElementById(p).classList.remove('active'));
+
+  function step() {
+    if (pipeStep < stages.length) {
+      document.getElementById(stages[pipeStep]).classList.add('active');
+      document.getElementById(panels[pipeStep]).classList.add('active');
+      pipeStep++;
+      setTimeout(step, 180);
+    }
+  }
+  step();
+}
+
+function setPattern(p, btn) {
+  currentPattern = p;
+  document.getElementById('patternLabel').textContent = btn.textContent;
+  document.querySelectorAll('.ctrl-group button').forEach(b => {
+    if(b.textContent === btn.textContent) b.classList.add('active');
+    else if(['Checker','Stripes','Circle','Noise','Cross'].includes(b.textContent)) b.classList.remove('active');
+  });
+  update();
+}
+
+function setFilter(f, btn) {
+  currentFilter = f;
+  document.getElementById('filterLabel').textContent = btn.textContent;
+  btn.closest('.btn-row').querySelectorAll('button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  update();
+}
+
+function onRadiusChange(el) {
+  filterRadius = parseInt(el.value);
+  document.getElementById('radiusVal').textContent = filterRadius;
+  update();
+}
+
+// Init
+update();
+</script>
+</body>
+</html>

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Notch Filter Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0c0f;
+    --panel: #0f1318;
+    --border: #1e2530;
+    --accent: #00e5ff;
+    --warn: #ff4060;
+    --ok: #39ff14;
+    --muted: #4a5568;
+    --text: #c8d3de;
+    --dim: #6b7e92;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 0.72rem;
+    color: var(--dim);
+    margin-bottom: 24px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    position: relative;
+  }
+
+  .panel-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--dim);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tag {
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: 700;
+  }
+  .tag-bad { background: rgba(255,64,96,0.15); color: var(--warn); border: 1px solid rgba(255,64,96,0.3); }
+  .tag-good { background: rgba(57,255,20,0.1); color: var(--ok); border: 1px solid rgba(57,255,20,0.3); }
+  .tag-info { background: rgba(0,229,255,0.1); color: var(--accent); border: 1px solid rgba(0,229,255,0.3); }
+
+  canvas {
+    width: 100%;
+    display: block;
+    border-radius: 4px;
+  }
+
+  .controls {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 20px;
+    display: flex;
+    gap: 32px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .control-group { display: flex; flex-direction: column; gap: 6px; }
+  .control-group label { font-size: 0.65rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  input[type=range] {
+    accent-color: var(--accent);
+    width: 160px;
+    cursor: pointer;
+  }
+
+  .val { font-size: 0.75rem; color: var(--accent); font-weight: 700; }
+
+  .annotation {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    font-size: 0.72rem;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .annotation strong { color: #fff; }
+  .highlight-bad { color: var(--warn); font-weight: 700; }
+  .highlight-good { color: var(--ok); font-weight: 700; }
+  .highlight-cyan { color: var(--accent); font-weight: 700; }
+
+  @media (max-width: 800px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>FFT Periodic Noise · Notch vs Low-Pass Filter</h1>
+<p class="subtitle">Interactive demo — scanner horizontal line noise in frequency domain</p>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Noise Frequency <span class="val" id="noiseFreqVal">8</span> lines</label>
+    <input type="range" id="noiseFreq" min="3" max="18" value="8">
+  </div>
+  <div class="control-group">
+    <label>Noise Amplitude <span class="val" id="noiseAmpVal">60</span>%</label>
+    <input type="range" id="noiseAmp" min="10" max="100" value="60">
+  </div>
+  <div class="control-group">
+    <label>Low-Pass Cutoff <span class="val" id="lpCutoffVal">30</span>%</label>
+    <input type="range" id="lpCutoff" min="5" max="80" value="30">
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="panel-label">① Original (noisy scan) <span class="tag tag-bad">CORRUPTED</span></div>
+    <canvas id="cOriginal" width="320" height="220"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label">② FFT Magnitude Spectrum <span class="tag tag-info">FREQ DOMAIN</span></div>
+    <canvas id="cFFT" width="320" height="220"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label">③ Low-Pass Applied <span class="tag tag-bad">FAILS</span></div>
+    <canvas id="cLowPass" width="320" height="220"></canvas>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="panel-label">④ Clean document (reference) <span class="tag tag-good">IDEAL</span></div>
+    <canvas id="cClean" width="320" height="220"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label">⑤ Notch Filter Mask <span class="tag tag-info">TARGETING NOISE</span></div>
+    <canvas id="cNotchMask" width="320" height="220"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="panel-label">⑥ Notch Filter Applied <span class="tag tag-good">WORKS</span></div>
+    <canvas id="cNotch" width="320" height="220"></canvas>
+  </div>
+</div>
+
+<div class="annotation">
+  <strong>Why Low-Pass Fails:</strong> Horizontal scanner lines repeat at a <span class="highlight-bad">specific spatial frequency</span> (e.g., every N pixels). In the FFT spectrum, this appears as <span class="highlight-bad">bright spikes along the vertical axis</span> (fy ≠ 0, fx ≈ 0). A low-pass filter removes <em>all</em> high-frequency detail — blurring text and edges — but the noise spikes can sit at <span class="highlight-bad">mid-range or even low frequencies</span>, so they survive the low-pass entirely.<br><br>
+  <strong>Why Notch Works:</strong> A notch filter <span class="highlight-good">surgically zeros out only those specific spike coordinates</span> in the 2D FFT. After inverse FFT, the periodic lines are gone while text sharpness is preserved. You can see the <span class="highlight-cyan">targeted notch holes</span> in panel ⑤ — everything else passes through unchanged.
+</div>
+
+<script>
+// ── helpers ──────────────────────────────────────────────────────────────────
+const W = 320, H = 220;
+
+function getCtx(id) {
+  const c = document.getElementById(id);
+  c.width = W; c.height = H;
+  return c.getContext('2d');
+}
+
+// Simple DFT-based approach: we work in "image space" and "spectral space"
+// using actual math to keep it physically correct.
+
+// Build a synthetic grayscale document image (NxN) as Float32Array
+function buildCleanImage(N) {
+  const img = new Float32Array(N * N).fill(240); // white background
+  // Draw some text-like horizontal blocks
+  const lines = [
+    {y:0.1, h:0.04, text: true},
+    {y:0.2, h:0.04, text: true},
+    {y:0.3, h:0.04, text: true},
+    {y:0.42, h:0.04, text: true},
+    {y:0.55, h:0.04, text: true},
+    {y:0.67, h:0.04, text: true},
+    {y:0.78, h:0.04, text: true},
+  ];
+  for (const l of lines) {
+    const y0 = Math.floor(l.y * N), y1 = Math.floor((l.y + l.h) * N);
+    for (let y = y0; y < y1; y++) {
+      // vary pattern left/right to simulate text
+      for (let x = 0; x < N; x++) {
+        const pattern = Math.sin(x / N * Math.PI * 40) * 0.5 + 0.5;
+        const shade = 20 + pattern * 60;
+        img[y * N + x] = shade;
+      }
+    }
+  }
+  return img;
+}
+
+function addNoiseLines(clean, N, freq, amp) {
+  const out = new Float32Array(clean);
+  for (let y = 0; y < N; y++) {
+    const noise = Math.sin(2 * Math.PI * freq * y / N) * amp;
+    for (let x = 0; x < N; x++) {
+      out[y * N + x] = Math.min(255, Math.max(0, clean[y * N + x] + noise));
+    }
+  }
+  return out;
+}
+
+// Draw grayscale image on canvas
+function drawGray(ctx, data, N, highlight) {
+  ctx.clearRect(0,0,W,H);
+  const sx = W / N, sy = H / N;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const v = Math.floor(data[y * N + x]);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(x * sx, y * sy, Math.ceil(sx), Math.ceil(sy));
+    }
+  }
+}
+
+// ── FFT (1D Cooley-Tukey, powers of 2) ───────────────────────────────────────
+function fft(re, im, inverse) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = 2 * Math.PI / len * (inverse ? -1 : 1);
+    const wRe = Math.cos(ang), wIm = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let curRe = 1, curIm = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const uRe = re[i+j], uIm = im[i+j];
+        const vRe = re[i+j+len/2]*curRe - im[i+j+len/2]*curIm;
+        const vIm = re[i+j+len/2]*curIm + im[i+j+len/2]*curRe;
+        re[i+j] = uRe+vRe; im[i+j] = uIm+vIm;
+        re[i+j+len/2] = uRe-vRe; im[i+j+len/2] = uIm-vIm;
+        [curRe, curIm] = [curRe*wRe - curIm*wIm, curRe*wIm + curIm*wRe];
+      }
+    }
+  }
+  if (inverse) { for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; } }
+}
+
+// 2D FFT using row/col 1D FFTs
+function fft2d(re, im, N, inverse) {
+  const tmp_re = new Float64Array(N), tmp_im = new Float64Array(N);
+  // rows
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) { tmp_re[x] = re[y*N+x]; tmp_im[x] = im[y*N+x]; }
+    fft(tmp_re, tmp_im, inverse);
+    for (let x = 0; x < N; x++) { re[y*N+x] = tmp_re[x]; im[y*N+x] = tmp_im[x]; }
+  }
+  // cols
+  for (let x = 0; x < N; x++) {
+    for (let y = 0; y < N; y++) { tmp_re[y] = re[y*N+x]; tmp_im[y] = im[y*N+x]; }
+    fft(tmp_re, tmp_im, inverse);
+    for (let y = 0; y < N; y++) { re[y*N+x] = tmp_re[y]; im[y*N+x] = tmp_im[y]; }
+  }
+}
+
+function fftShift(data, N) {
+  // shift so DC is at center
+  const out = new Float64Array(N*N);
+  const h = N/2;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const ny = (y + h) % N, nx = (x + h) % N;
+      out[ny*N+nx] = data[y*N+x];
+    }
+  }
+  return out;
+}
+
+function fftShiftComplex(re, im, N) {
+  return [fftShift(re,N), fftShift(im,N)];
+}
+
+// ── Main render ───────────────────────────────────────────────────────────────
+const N = 64; // power of 2, manageable size
+
+let cleanImg = buildCleanImage(N);
+
+function render() {
+  const freq = parseInt(document.getElementById('noiseFreq').value);
+  const amp  = parseInt(document.getElementById('noiseAmp').value);
+  const lpCut = parseInt(document.getElementById('lpCutoff').value) / 100;
+
+  document.getElementById('noiseFreqVal').textContent = freq;
+  document.getElementById('noiseAmpVal').textContent = amp;
+  document.getElementById('lpCutoffVal').textContent = parseInt(document.getElementById('lpCutoff').value);
+
+  const noisy = addNoiseLines(cleanImg, N, freq, amp);
+
+  // ── Panel 1: Original noisy ──
+  drawGray(getCtx('cOriginal'), noisy, N);
+
+  // ── Panel 4: Clean reference ──
+  drawGray(getCtx('cClean'), cleanImg, N);
+
+  // ── Compute 2D FFT of noisy image ──
+  const re = new Float64Array(N*N), im = new Float64Array(N*N);
+  for (let i = 0; i < N*N; i++) { re[i] = noisy[i]; im[i] = 0; }
+  fft2d(re, im, N, false);
+  const [sRe, sIm] = fftShiftComplex(re, im, N);
+
+  // ── Panel 2: FFT magnitude spectrum ──
+  drawSpectrum(getCtx('cFFT'), sRe, sIm, N, freq, null, null);
+
+  // ── Low-pass filter in frequency domain ──
+  const lpRe = sRe.slice(), lpIm = sIm.slice();
+  const cx = N/2, cy = N/2;
+  const cutR = lpCut * N/2;
+  let lpMask = new Float64Array(N*N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const d = Math.hypot(x-cx, y-cy);
+    const m = d < cutR ? 1 : 0;
+    lpMask[y*N+x] = m;
+    lpRe[y*N+x] *= m; lpIm[y*N+x] *= m;
+  }
+  const lpOut = ifft2dShifted(lpRe, lpIm, N);
+  drawGray(getCtx('cLowPass'), lpOut, N);
+
+  // ── Notch filter: remove specific freq spikes ──
+  const notchRe = sRe.slice(), notchIm = sIm.slice();
+  const notchRadius = 2.5;
+  // The periodic horizontal lines create spikes at (fx=0, fy=±freq) in shifted coords
+  // They appear at (cx, cy±freq) in the shifted spectrum
+  const notchMask = new Float64Array(N*N).fill(1);
+  // Suppress spikes at fy = ±freq (and harmonics up to Nyquist)
+  for (let k = 1; k * freq <= N/2; k++) {
+    for (const fy of [cy + k*freq, cy - k*freq]) {
+      if (fy < 0 || fy >= N) continue;
+      for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+        const d = Math.hypot(x - cx, y - fy);
+        if (d < notchRadius) { notchMask[y*N+x] = 0; notchRe[y*N+x] = 0; notchIm[y*N+x] = 0; }
+      }
+    }
+  }
+
+  // ── Panel 5: Notch mask ──
+  drawNotchMask(getCtx('cNotchMask'), notchMask, sRe, sIm, N, freq);
+
+  // ── Panel 6: Notch filtered image ──
+  const notchOut = ifft2dShifted(notchRe, notchIm, N);
+  drawGray(getCtx('cNotch'), notchOut, N);
+}
+
+function ifft2dShifted(sRe, sIm, N) {
+  // unshift, then ifft2d
+  const [uRe, uIm] = fftShiftComplex(sRe, sIm, N); // shift back
+  fft2d(uRe, uIm, N, true);
+  const out = new Float32Array(N*N);
+  for (let i = 0; i < N*N; i++) out[i] = Math.min(255, Math.max(0, uRe[i]));
+  return out;
+}
+
+function drawSpectrum(ctx, sRe, sIm, N, noiseFreq, mask, label) {
+  ctx.clearRect(0,0,W,H);
+  const sx = W/N, sy = H/N;
+
+  // Compute log magnitude
+  const mags = new Float64Array(N*N);
+  let maxM = 0;
+  for (let i = 0; i < N*N; i++) {
+    mags[i] = Math.log1p(Math.hypot(sRe[i], sIm[i]));
+    if (mags[i] > maxM) maxM = mags[i];
+  }
+
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const v = Math.floor(mags[y*N+x] / maxM * 255);
+      ctx.fillStyle = `rgb(${v},${v},${v})`;
+      ctx.fillRect(x*sx, y*sy, Math.ceil(sx), Math.ceil(sy));
+    }
+  }
+
+  // Highlight noise spikes in red
+  const cx = N/2, cy = N/2;
+  for (let k = 1; k * noiseFreq <= N/2; k++) {
+    for (const fy of [cy + k*noiseFreq, cy - k*noiseFreq]) {
+      if (fy < 0 || fy >= N) continue;
+      ctx.beginPath();
+      ctx.arc(cx*sx + sx/2, fy*sy + sy/2, 5, 0, 2*Math.PI);
+      ctx.strokeStyle = '#ff4060';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // label
+      ctx.fillStyle = '#ff4060';
+      ctx.font = '9px JetBrains Mono';
+      ctx.fillText(`fy=${k > 1 ? k+'×' : ''}${noiseFreq}`, cx*sx + 7, fy*sy + sy/2 + 3);
+    }
+  }
+
+  // draw axis cross
+  ctx.strokeStyle = 'rgba(0,229,255,0.3)';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(cx*sx, 0); ctx.lineTo(cx*sx, H); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, cy*sy); ctx.lineTo(W, cy*sy); ctx.stroke();
+
+  // DC label
+  ctx.fillStyle = 'rgba(0,229,255,0.8)';
+  ctx.font = '8px JetBrains Mono';
+  ctx.fillText('DC', cx*sx+3, cy*sy-4);
+}
+
+function drawNotchMask(ctx, mask, sRe, sIm, N, noiseFreq) {
+  ctx.clearRect(0,0,W,H);
+  const sx = W/N, sy = H/N;
+
+  // draw spectrum dimly
+  const mags = new Float64Array(N*N);
+  let maxM = 0;
+  for (let i = 0; i < N*N; i++) {
+    mags[i] = Math.log1p(Math.hypot(sRe[i], sIm[i]));
+    if (mags[i] > maxM) maxM = mags[i];
+  }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const v = Math.floor(mags[y*N+x] / maxM * 180);
+    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.fillRect(x*sx, y*sy, Math.ceil(sx), Math.ceil(sy));
+  }
+
+  // draw mask passes (green) and blocked (red holes)
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (mask[y*N+x] === 0) {
+      ctx.fillStyle = 'rgba(255,64,96,0.7)';
+      ctx.fillRect(x*sx, y*sy, Math.ceil(sx), Math.ceil(sy));
+    }
+  }
+
+  // annotation
+  ctx.fillStyle = 'rgba(57,255,20,0.9)';
+  ctx.font = '8px JetBrains Mono';
+  ctx.fillText('PASS (rest)', 3, H - 6);
+  ctx.fillStyle = 'rgba(255,64,96,0.9)';
+  ctx.fillText('BLOCK (notch)', 3, H - 18);
+}
+
+// ── Wire up controls ─────────────────────────────────────────────────────────
+['noiseFreq','noiseAmp','lpCutoff'].forEach(id => {
+  document.getElementById(id).addEventListener('input', render);
+});
+
+cleanImg = buildCleanImage(N);
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT · np.clip Visualizer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #050810;
+    --panel: #0b1120;
+    --border: #1a2540;
+    --accent: #00f0ff;
+    --warn: #ff4d6a;
+    --ok: #00e88f;
+    --mid: #f0a500;
+    --text: #c8d8f0;
+    --dim: #4a6080;
+    --code-bg: #060d1a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* grid bg */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(rgba(0,240,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,240,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  header {
+    padding: 40px 48px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: baseline; gap: 20px;
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(22px, 4vw, 36px);
+    font-weight: 800;
+    color: #fff;
+    letter-spacing: -1px;
+  }
+  header h1 span { color: var(--accent); }
+  header .tag {
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    padding: 3px 10px;
+    border-radius: 2px;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    padding: 0;
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 28px 32px;
+  }
+  .panel:nth-child(2) { border-left: none; }
+  .panel:nth-child(3) { border-top: 1px solid var(--border); }
+  .panel:nth-child(4) { border-top: 1px solid var(--border); border-left: none; }
+
+  .panel-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin-bottom: 16px;
+  }
+
+  /* VALUE BAR */
+  .value-display {
+    display: flex; align-items: center; gap: 16px;
+    margin-bottom: 10px;
+  }
+  .val-name {
+    font-size: 12px;
+    color: var(--dim);
+    width: 80px;
+    flex-shrink: 0;
+  }
+  .bar-wrap {
+    flex: 1;
+    height: 18px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    position: relative;
+    overflow: visible;
+  }
+  .bar-safe-zone {
+    position: absolute;
+    left: calc(0 / 4 * 100%);
+    width: calc(255 / 400 * 100%);
+    top: -1px; bottom: -1px;
+    background: rgba(0, 232, 143, 0.06);
+    border-left: 1px dashed rgba(0,232,143,0.3);
+    border-right: 1px dashed rgba(0,232,143,0.3);
+  }
+  .bar-fill {
+    height: 100%;
+    transition: width 0.4s cubic-bezier(0.4,0,0.2,1), background 0.3s;
+    border-radius: 1px;
+    position: relative;
+    z-index: 2;
+  }
+  .val-num {
+    font-size: 13px;
+    font-weight: 700;
+    width: 64px;
+    text-align: right;
+    transition: color 0.3s;
+    flex-shrink: 0;
+  }
+
+  /* STATUS BADGE */
+  .status-row {
+    display: flex; align-items: center; gap: 10px;
+    margin: 20px 0 10px;
+    font-size: 12px;
+  }
+  .badge {
+    padding: 4px 12px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    transition: all 0.3s;
+  }
+  .badge.overflow  { background: rgba(255,77,106,0.15); color: var(--warn); border: 1px solid rgba(255,77,106,0.4); }
+  .badge.underflow { background: rgba(240,165,0,0.12); color: var(--mid);  border: 1px solid rgba(240,165,0,0.4);  }
+  .badge.valid     { background: rgba(0,232,143,0.12); color: var(--ok);   border: 1px solid rgba(0,232,143,0.4);  }
+
+  /* CONTROLS */
+  .controls {
+    display: flex; flex-direction: column; gap: 16px;
+    margin-top: 8px;
+  }
+  .slider-row {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .slider-row label {
+    font-size: 11px;
+    color: var(--dim);
+    width: 110px;
+    flex-shrink: 0;
+  }
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 8px var(--accent);
+  }
+  .slider-val {
+    font-size: 12px;
+    color: var(--accent);
+    width: 55px;
+    text-align: right;
+  }
+
+  /* CODE BLOCK */
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px 20px;
+    font-size: 13px;
+    line-height: 2;
+    position: relative;
+    overflow: hidden;
+  }
+  .code-block::before {
+    content: 'PYTHON';
+    position: absolute;
+    top: 10px; right: 14px;
+    font-size: 9px;
+    letter-spacing: 2px;
+    color: var(--dim);
+  }
+  .kw { color: #ff7eb3; }
+  .fn { color: #79b8ff; }
+  .num { color: #ffab70; }
+  .cm { color: var(--dim); font-style: italic; }
+  .hl { background: rgba(0,240,255,0.08); border-left: 2px solid var(--accent); padding-left: 8px; margin-left: -8px; display: block; }
+
+  /* PIPELINE */
+  .pipeline {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .pipe-step {
+    flex: 1;
+    min-width: 100px;
+    padding: 14px 12px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px;
+    position: relative;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .pipe-step:not(:last-child)::after {
+    content: '→';
+    position: absolute;
+    right: -12px;
+    top: 50%; transform: translateY(-50%);
+    color: var(--dim);
+    font-size: 14px;
+    z-index: 10;
+  }
+  .pipe-step.active { border-color: var(--accent); background: rgba(0,240,255,0.04); }
+  .pipe-step.clamp-step { border-color: rgba(0,232,143,0.5); background: rgba(0,232,143,0.04); }
+  .pipe-icon { font-size: 20px; }
+  .pipe-title { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); }
+  .pipe-val { font-size: 13px; font-weight: 700; transition: color 0.3s; }
+
+  /* HISTOGRAM */
+  .histogram {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 80px;
+    margin-top: 16px;
+    padding: 0 2px;
+    position: relative;
+  }
+  .hist-bar {
+    flex: 1;
+    border-radius: 1px 1px 0 0;
+    transition: height 0.4s cubic-bezier(0.4,0,0.2,1), background 0.3s;
+    min-height: 2px;
+  }
+  .hist-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: var(--dim);
+    margin-top: 4px;
+    letter-spacing: 1px;
+  }
+  .hist-line {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 1px;
+    background: rgba(0,232,143,0.4);
+  }
+  .hist-line.left { left: 0%; }
+  .hist-line.right { left: calc(255/400 * 100%); }
+
+  /* FULL WIDTH PANEL */
+  .panel-full {
+    border: 1px solid var(--border);
+    border-top: none;
+    padding: 28px 32px;
+    grid-column: 1 / -1;
+  }
+
+  .insight-row {
+    display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px;
+  }
+  .insight {
+    flex: 1; min-width: 160px;
+    padding: 14px 18px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+  }
+  .insight-label { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+  .insight-val { font-size: 20px; font-weight: 700; transition: color 0.3s; }
+
+  /* ANIMATION pulse */
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .pulsing { animation: pulse 1.2s ease-in-out infinite; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FFT · <span>np.clip</span> Visualizer</h1>
+  <span class="tag">Pixel Safety</span>
+  <span class="tag">Float → uint8</span>
+</header>
+
+<div class="layout" style="display:grid; grid-template-columns:1fr 1fr;">
+
+  <!-- PANEL 1: Live Value Tracker -->
+  <div class="panel">
+    <div class="panel-label">01 — Raw Float Value (Post-FFT Reconstruction)</div>
+
+    <div id="value-bars">
+      <!-- filled by JS -->
+    </div>
+
+    <div class="status-row">
+      <span>Status:</span>
+      <span class="badge" id="status-badge">VALID</span>
+      <span id="status-msg" style="font-size:11px;color:var(--dim)"></span>
+    </div>
+
+    <div style="margin-top:24px;">
+      <div class="panel-label">ADJUST RAW FLOAT VALUE</div>
+      <div class="controls">
+        <div class="slider-row">
+          <label>Raw value</label>
+          <input type="range" id="raw-slider" min="-60" max="340" step="1" value="128">
+          <span class="slider-val" id="raw-display">128</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 2: Pipeline -->
+  <div class="panel" style="border-left:none;">
+    <div class="panel-label">02 — Clip & Cast Pipeline</div>
+    <div class="pipeline" id="pipeline">
+      <div class="pipe-step" id="step-raw">
+        <span class="pipe-icon">🔢</span>
+        <span class="pipe-title">Raw Float</span>
+        <span class="pipe-val" id="p-raw">128.0</span>
+      </div>
+      <div class="pipe-step" id="step-clip">
+        <span class="pipe-icon">✂️</span>
+        <span class="pipe-title">np.clip</span>
+        <span class="pipe-val" id="p-clip">128.0</span>
+      </div>
+      <div class="pipe-step" id="step-cast">
+        <span class="pipe-icon">📦</span>
+        <span class="pipe-title">astype(uint8)</span>
+        <span class="pipe-val" id="p-cast">128</span>
+      </div>
+    </div>
+
+    <div style="margin-top:24px;">
+      <div class="panel-label">OPERATION BREAKDOWN</div>
+      <div class="code-block">
+<span class="cm"># Post-IFFT float result</span>
+result = ifft_output  <span class="cm"># may be &lt;0 or &gt;255</span>
+
+<span class="hl"><span class="fn">np</span>.clip(result, <span class="num">0</span>, <span class="num">255</span>).astype(<span class="fn">np</span>.uint8)</span>
+<span class="cm">#   ↑ clamp    ↑ min  ↑ max   ↑ cast to 8-bit</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- PANEL 3: Distribution Histogram -->
+  <div class="panel" style="border-top:1px solid var(--border);">
+    <div class="panel-label">03 — Simulated Pixel Distribution (32 samples)</div>
+    <div class="histogram" id="histogram">
+      <div class="hist-line left"></div>
+      <div class="hist-line right"></div>
+    </div>
+    <div class="hist-labels">
+      <span>-60</span>
+      <span>0</span>
+      <span>128</span>
+      <span>255</span>
+      <span>340</span>
+    </div>
+    <div class="insight-row" id="insights">
+      <!-- filled by JS -->
+    </div>
+  </div>
+
+  <!-- PANEL 4: What happens -->
+  <div class="panel" style="border-top:1px solid var(--border); border-left:none;">
+    <div class="panel-label">04 — Why Clipping Is Needed</div>
+
+    <div style="line-height:1.9; font-size:12px; color:var(--text);">
+      <p style="margin-bottom:12px;">
+        After <span style="color:var(--accent)">IFFT (Inverse FFT)</span>, floating-point reconstruction introduces values outside the displayable uint8 range <span style="color:var(--ok)">[0, 255]</span>.
+      </p>
+      <p style="margin-bottom:12px;">
+        <span style="color:var(--warn)">Overflow (&gt;255)</span> wraps around or saturates → <span style="color:var(--warn)">bright artifacts</span><br>
+        <span style="color:var(--mid)">Underflow (&lt;0)</span> wraps to large values → <span style="color:var(--mid)">dark/corrupt pixels</span>
+      </p>
+      <p>
+        <code style="background:var(--code-bg);padding:2px 6px;border-radius:2px;border:1px solid var(--border);font-size:11px;">np.clip(x, 0, 255).astype(np.uint8)</code><br>
+        Hard-clamps all values, then casts — giving a clean, display-ready image.
+      </p>
+    </div>
+
+    <div style="margin-top:24px;">
+      <div class="panel-label">SIMULATE BATCH</div>
+      <div class="controls">
+        <div class="slider-row">
+          <label>Noise intensity</label>
+          <input type="range" id="noise-slider" min="0" max="100" step="1" value="30">
+          <span class="slider-val" id="noise-display">30%</span>
+        </div>
+        <div class="slider-row">
+          <label>Center value</label>
+          <input type="range" id="center-slider" min="0" max="255" step="1" value="128">
+          <span class="slider-val" id="center-display">128</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Single Value Tracker ────────────────────────────────────────
+const rawSlider = document.getElementById('raw-slider');
+const rawDisplay = document.getElementById('raw-display');
+const valueBars = document.getElementById('value-bars');
+const statusBadge = document.getElementById('status-badge');
+const statusMsg = document.getElementById('status-msg');
+const RANGE = 400; // display range: -60 to 340
+
+function pct(v) {
+  return Math.min(100, Math.max(0, (v + 60) / RANGE * 100));
+}
+
+function renderSingleValue(raw) {
+  const clipped = Math.min(255, Math.max(0, raw));
+  const casted = Math.round(clipped);
+
+  // Determine status
+  let status, color;
+  if (raw > 255)      { status = 'OVERFLOW';  color = 'var(--warn)'; }
+  else if (raw < 0)   { status = 'UNDERFLOW'; color = 'var(--mid)';  }
+  else                { status = 'VALID';      color = 'var(--ok)';   }
+
+  // Badge
+  statusBadge.textContent = status;
+  statusBadge.className = 'badge ' + (status === 'OVERFLOW' ? 'overflow' : status === 'UNDERFLOW' ? 'underflow' : 'valid');
+  statusMsg.textContent = status === 'VALID'
+    ? 'No clipping needed'
+    : `Will be clamped to ${raw > 255 ? '255' : '0'}`;
+
+  // Bars HTML
+  const rows = [
+    { name: 'Raw Float', val: raw,     col: color },
+    { name: 'Clipped',   val: clipped, col: 'var(--ok)' },
+    { name: 'uint8',     val: casted,  col: 'var(--accent)' },
+  ];
+  valueBars.innerHTML = rows.map(r => {
+    const w = pct(r.val);
+    return `
+    <div class="value-display">
+      <span class="val-name">${r.name}</span>
+      <div class="bar-wrap">
+        <div class="bar-safe-zone"></div>
+        <div class="bar-fill" style="width:${w}%; background:${r.col};"></div>
+      </div>
+      <span class="val-num" style="color:${r.col}">${Number.isInteger(r.val) ? r.val : r.val.toFixed(1)}</span>
+    </div>`;
+  }).join('');
+
+  // Pipeline
+  document.getElementById('p-raw').textContent  = raw.toFixed(1);
+  document.getElementById('p-clip').textContent = clipped.toFixed(1);
+  document.getElementById('p-cast').textContent = casted;
+
+  document.getElementById('p-raw').style.color   = color;
+  document.getElementById('p-clip').style.color  = 'var(--ok)';
+  document.getElementById('p-cast').style.color  = 'var(--accent)';
+
+  document.getElementById('step-raw').className  = 'pipe-step' + (raw < 0 || raw > 255 ? ' active' : '');
+  document.getElementById('step-clip').className = 'pipe-step clamp-step';
+}
+
+rawSlider.addEventListener('input', () => {
+  const v = parseFloat(rawSlider.value);
+  rawDisplay.textContent = v.toFixed(1);
+  renderSingleValue(v);
+});
+renderSingleValue(128);
+
+// ─── Histogram / Batch Sim ──────────────────────────────────────
+const noiseSlider  = document.getElementById('noise-slider');
+const noiseDisplay = document.getElementById('noise-display');
+const centerSlider = document.getElementById('center-slider');
+const centerDisplay = document.getElementById('center-display');
+const histogram = document.getElementById('histogram');
+const insightsEl = document.getElementById('insights');
+
+const N_BARS = 32;
+const MIN_V = -60, MAX_V = 340;
+
+function generateSamples(center, noiseLevel) {
+  const spread = noiseLevel * 2.0;
+  return Array.from({length: N_BARS}, (_, i) => {
+    // gaussian-ish distribution
+    const u1 = Math.random(), u2 = Math.random();
+    const gauss = Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2);
+    return center + gauss * spread;
+  });
+}
+
+function renderHistogram() {
+  const center = parseFloat(centerSlider.value);
+  const noise  = parseFloat(noiseSlider.value);
+  noiseDisplay.textContent  = noise + '%';
+  centerDisplay.textContent = center;
+
+  const samples = generateSamples(center, noise);
+  const clipped = samples.map(v => Math.min(255, Math.max(0, v)));
+
+  const overCount  = samples.filter(v => v > 255).length;
+  const underCount = samples.filter(v => v < 0).length;
+  const validCount = N_BARS - overCount - underCount;
+
+  // Build bars: remove old ones
+  const existing = histogram.querySelectorAll('.hist-bar');
+  existing.forEach(b => b.remove());
+
+  const maxVal = Math.max(...samples.map(Math.abs), 1);
+  samples.forEach(v => {
+    const bar = document.createElement('div');
+    bar.className = 'hist-bar';
+    const h = Math.abs(v) / (MAX_V - MIN_V) * 100;
+    bar.style.height = Math.max(4, h) + '%';
+    bar.style.background = v > 255
+      ? 'var(--warn)'
+      : v < 0
+      ? 'var(--mid)'
+      : 'var(--ok)';
+    histogram.appendChild(bar);
+  });
+
+  // Insights
+  insightsEl.innerHTML = [
+    { label: 'Overflow (>255)', val: overCount,  col: 'var(--warn)' },
+    { label: 'Underflow (<0)',  val: underCount, col: 'var(--mid)'  },
+    { label: 'Valid [0,255]',   val: validCount, col: 'var(--ok)'   },
+    { label: 'Clipped Total',   val: overCount + underCount, col: 'var(--accent)' },
+  ].map(d => `
+    <div class="insight">
+      <div class="insight-label">${d.label}</div>
+      <div class="insight-val" style="color:${d.col}">${d.val}</div>
+    </div>
+  `).join('');
+}
+
+noiseSlider.addEventListener('input', renderHistogram);
+centerSlider.addEventListener('input', renderHistogram);
+renderHistogram();
+
+// Re-randomize histogram periodically
+setInterval(renderHistogram, 2000);
+</script>
+</body>
+</html>

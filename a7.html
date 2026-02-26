@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Low-Pass Filter — Denoising Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;500;700&display=swap');
+
+  :root {
+    --bg: #050a12;
+    --panel: #0b1220;
+    --border: #1a2d45;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --glow: rgba(0,212,255,0.15);
+    --text: #c8e0f0;
+    --dim: #4a6070;
+    --green: #39ff14;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid noise bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 30px 20px;
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .title-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 6px;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    opacity: 0.8;
+  }
+
+  h1 {
+    font-size: clamp(28px, 4vw, 52px);
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    line-height: 1.1;
+  }
+
+  h1 span {
+    color: var(--accent);
+    text-shadow: 0 0 30px var(--accent);
+  }
+
+  .subtitle {
+    margin-top: 10px;
+    font-size: 15px;
+    color: var(--dim);
+    font-weight: 300;
+    letter-spacing: 1px;
+  }
+
+  /* Control panel */
+  .control-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
+    border-radius: 4px;
+    padding: 24px 32px;
+    margin-bottom: 32px;
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    flex-wrap: wrap;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .control-panel::before {
+    content: 'SIGNAL PROCESSING PARAMETERS';
+    position: absolute;
+    top: 6px; right: 16px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--accent);
+    opacity: 0.4;
+    letter-spacing: 3px;
+  }
+
+  .ctrl-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-width: 200px;
+  }
+
+  .ctrl-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    flex: 1;
+    height: 4px;
+    background: linear-gradient(90deg, var(--accent) var(--pct, 50%), var(--border) var(--pct, 50%));
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+
+  input[type=range]::-webkit-slider-thumb:hover {
+    transform: scale(1.3);
+  }
+
+  .val-display {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 20px;
+    color: #fff;
+    min-width: 50px;
+    text-align: right;
+  }
+
+  .psnr-bar-container {
+    flex: 2;
+    min-width: 260px;
+  }
+
+  .psnr-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent2);
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+
+  .psnr-value {
+    font-size: 36px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .psnr-value span {
+    font-size: 14px;
+    color: var(--dim);
+    margin-left: 6px;
+  }
+
+  .psnr-bar {
+    margin-top: 8px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .psnr-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease, background 0.4s;
+  }
+
+  /* Main viz grid */
+  .viz-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 28px;
+  }
+
+  .viz-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .viz-card-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .card-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .card-badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    letter-spacing: 1px;
+  }
+
+  .badge-freq { background: rgba(0,212,255,0.15); color: var(--accent); border: 1px solid rgba(0,212,255,0.3); }
+  .badge-space { background: rgba(57,255,20,0.1); color: var(--green); border: 1px solid rgba(57,255,20,0.3); }
+  .badge-psnr { background: rgba(255,107,53,0.15); color: var(--accent2); border: 1px solid rgba(255,107,53,0.3); }
+
+  canvas {
+    display: block;
+    width: 100%;
+  }
+
+  /* Frequency domain explanation strip */
+  .info-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+
+  .info-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px;
+    border-radius: 4px;
+    position: relative;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+
+  .info-card.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 20px rgba(0,212,255,0.1);
+  }
+
+  .info-cutoff {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 22px;
+    font-weight: bold;
+    color: #fff;
+  }
+
+  .info-cutoff small {
+    font-size: 12px;
+    color: var(--dim);
+  }
+
+  .info-psnr {
+    font-size: 13px;
+    margin-top: 6px;
+    color: var(--dim);
+    font-family: 'Share Tech Mono', monospace;
+  }
+
+  .info-psnr strong {
+    color: var(--accent2);
+  }
+
+  .info-desc {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--dim);
+    font-weight: 300;
+    line-height: 1.4;
+  }
+
+  .dot-indicator {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: background 0.3s, box-shadow 0.3s;
+  }
+
+  .info-card.active .dot-indicator {
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    animation: pulse 1.5s infinite;
+  }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Frequency spectrum chart */
+  .spectrum-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+
+  .spectrum-header {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .footer-note {
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    padding-bottom: 20px;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .viz-card, .info-card, .spectrum-card {
+    animation: fadeIn 0.5s ease both;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="title-label">// FFT Spatial Frequency Analysis</div>
+    <h1>Low-Pass Filter <span>Denoising</span></h1>
+    <div class="subtitle">Visualizing frequency-domain filtering · PSNR optimization · Cutoff sweep</div>
+  </header>
+
+  <div class="control-panel">
+    <div class="ctrl-group">
+      <div class="ctrl-label">// Cutoff Frequency (fc)</div>
+      <div class="slider-row">
+        <input type="range" id="cutoffSlider" min="5" max="120" value="50" oninput="updateAll(this.value)">
+        <div class="val-display" id="cutoffVal">50</div>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">// Noise Level (σ)</div>
+      <div class="slider-row">
+        <input type="range" id="noiseSlider" min="5" max="80" value="30" oninput="updateAll(null)">
+        <div class="val-display" id="noiseVal">30</div>
+      </div>
+    </div>
+    <div class="psnr-bar-container">
+      <div class="psnr-title">// PEAK SIGNAL-TO-NOISE RATIO</div>
+      <div class="psnr-value" id="psnrDisplay">23.3 <span>dB</span></div>
+      <div class="psnr-bar"><div class="psnr-fill" id="psnrFill"></div></div>
+    </div>
+  </div>
+
+  <!-- Three canvases: FFT filter shape, denoised image, PSNR curve -->
+  <div class="viz-grid">
+    <div class="viz-card" style="animation-delay:0.1s">
+      <div class="viz-card-header">
+        <span class="card-title">// FFT Magnitude Spectrum</span>
+        <span class="card-badge badge-freq">FREQ DOMAIN</span>
+      </div>
+      <canvas id="fftCanvas" width="380" height="280"></canvas>
+    </div>
+    <div class="viz-card" style="animation-delay:0.2s">
+      <div class="viz-card-header">
+        <span class="card-title">// Denoised Output</span>
+        <span class="card-badge badge-space">SPATIAL DOMAIN</span>
+      </div>
+      <canvas id="imgCanvas" width="380" height="280"></canvas>
+    </div>
+    <div class="viz-card" style="animation-delay:0.3s">
+      <div class="viz-card-header">
+        <span class="card-title">// PSNR vs Cutoff</span>
+        <span class="card-badge badge-psnr">QUALITY METRIC</span>
+      </div>
+      <canvas id="psnrCanvas" width="380" height="280"></canvas>
+    </div>
+  </div>
+
+  <!-- Info strip: 4 preset cutoffs -->
+  <div class="info-strip" id="infoStrip">
+    <!-- filled by JS -->
+  </div>
+
+  <!-- Frequency profile -->
+  <div class="spectrum-card" style="animation-delay:0.4s">
+    <div class="spectrum-header">
+      <span class="card-title">// Radial Frequency Profile — Filter Response</span>
+      <span class="card-badge badge-freq">1D CROSS-SECTION</span>
+    </div>
+    <canvas id="profileCanvas" width="1240" height="120" style="width:100%;display:block;padding:16px;background:var(--panel)"></canvas>
+  </div>
+
+  <div class="footer-note">DRAG SLIDER TO SWEEP CUTOFF · PSNR PEAKS NEAR fc = 50 · ALL RENDERING IN-BROWSER VIA CANVAS API</div>
+</div>
+
+<script>
+// ─── Scene geometry (matches the image) ──────────────────────────────────────
+const W = 200, H = 200;
+
+function buildCleanImage() {
+  const data = new Float32Array(W * H);
+  // Background = 0
+  // Rectangle top-left
+  for (let y = 20; y < 90; y++)
+    for (let x = 10; x < 130; x++)
+      data[y*W+x] = 180;
+  // Small square top-right (overlapping)
+  for (let y = 10; y < 55; y++)
+    for (let x = 90; x < 150; x++)
+      data[y*W+x] = 140;
+  // Circle bottom-center
+  const cx = 70, cy = 140, r = 45;
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++)
+      if ((x-cx)**2+(y-cy)**2 <= r*r)
+        data[y*W+x] = 220;
+  // Diagonal line
+  for (let i = 0; i < Math.min(W,H); i++)
+    if (i < H && i < W) data[i*W+i] = 200;
+  // Horizontal lines (stripes)
+  for (let row of [120,124,128,132]) {
+    for (let x = 110; x < 180; x++)
+      if (row < H) data[row*W+x] = 210;
+  }
+  return data;
+}
+
+const clean = buildCleanImage();
+
+function addNoise(sigma) {
+  const noisy = new Float32Array(clean.length);
+  for (let i = 0; i < clean.length; i++) {
+    // Box-Muller
+    const u1 = Math.random(), u2 = Math.random();
+    const g = Math.sqrt(-2*Math.log(u1||1e-9)) * Math.cos(2*Math.PI*u2);
+    noisy[i] = Math.min(255, Math.max(0, clean[i] + sigma * g));
+  }
+  return noisy;
+}
+
+// ─── Simple 2D DFT via separable 1D FFT (Cooley-Tukey, powers of 2) ──────────
+// We'll use 128x128 for speed
+const N = 128;
+function fft1d(re, im) {
+  const n = re.length;
+  if (n <= 1) return;
+  const rE = new Float32Array(n/2), iE = new Float32Array(n/2);
+  const rO = new Float32Array(n/2), iO = new Float32Array(n/2);
+  for (let k = 0; k < n/2; k++) { rE[k]=re[2*k]; iE[k]=im[2*k]; rO[k]=re[2*k+1]; iO[k]=im[2*k+1]; }
+  fft1d(rE,iE); fft1d(rO,iO);
+  for (let k = 0; k < n/2; k++) {
+    const ang = -2*Math.PI*k/n;
+    const cos = Math.cos(ang), sin = Math.sin(ang);
+    const trRe = cos*rO[k] - sin*iO[k];
+    const trIm = sin*rO[k] + cos*iO[k];
+    re[k]     = rE[k] + trRe; im[k]     = iE[k] + trIm;
+    re[k+n/2] = rE[k] - trRe; im[k+n/2] = iE[k] - trIm;
+  }
+}
+
+function ifft1d(re, im) {
+  // conjugate, fft, conjugate, scale
+  for (let i=0;i<im.length;i++) im[i]=-im[i];
+  fft1d(re,im);
+  for (let i=0;i<re.length;i++) { re[i]/=re.length; im[i]=-im[i]/re.length; }
+}
+
+function fft2d(re, im, n) {
+  const row_re = new Float32Array(n), row_im = new Float32Array(n);
+  for (let y=0;y<n;y++) {
+    for (let x=0;x<n;x++) { row_re[x]=re[y*n+x]; row_im[x]=im[y*n+x]; }
+    fft1d(row_re, row_im);
+    for (let x=0;x<n;x++) { re[y*n+x]=row_re[x]; im[y*n+x]=row_im[x]; }
+  }
+  for (let x=0;x<n;x++) {
+    for (let y=0;y<n;y++) { row_re[y]=re[y*n+x]; row_im[y]=im[y*n+x]; }
+    fft1d(row_re, row_im);
+    for (let y=0;y<n;y++) { re[y*n+x]=row_re[y]; im[y*n+x]=row_im[y]; }
+  }
+}
+
+function ifft2d(re, im, n) {
+  for (let i=0;i<n*n;i++) im[i]=-im[i];
+  fft2d(re,im,n);
+  for (let i=0;i<n*n;i++) { re[i]/=(n*n); im[i]=-im[i]/(n*n); }
+}
+
+function fftshift(data, n) {
+  const out = new Float32Array(n*n);
+  const h = n/2;
+  for (let y=0;y<n;y++)
+    for (let x=0;x<n;x++)
+      out[((y+h)%n)*n+((x+h)%n)] = data[y*n+x];
+  return out;
+}
+
+// Bilinear resize to NxN
+function resize(src, sw, sh, dw, dh) {
+  const dst = new Float32Array(dw*dh);
+  for (let y=0;y<dh;y++) {
+    for (let x=0;x<dw;x++) {
+      const sx = x*(sw-1)/(dw-1), sy = y*(sh-1)/(dh-1);
+      const x0=Math.floor(sx), y0=Math.floor(sy);
+      const x1=Math.min(x0+1,sw-1), y1=Math.min(y0+1,sh-1);
+      const fx=sx-x0, fy=sy-y0;
+      dst[y*dw+x] =
+        src[y0*sw+x0]*(1-fx)*(1-fy)+
+        src[y0*sw+x1]*fx*(1-fy)+
+        src[y1*sw+x0]*(1-fx)*fy+
+        src[y1*sw+x1]*fx*fy;
+    }
+  }
+  return dst;
+}
+
+// ─── Core denoising function ──────────────────────────────────────────────────
+let cachedNoise = null, cachedSigma = -1;
+
+function denoise(sigma, cutoff) {
+  if (cachedSigma !== sigma) { cachedNoise = addNoise(sigma); cachedSigma = sigma; }
+  const noisy = cachedNoise;
+
+  // Resize to N for FFT
+  const s = resize(noisy, W, H, N, N);
+  const re = new Float32Array(s); // copy
+  const im = new Float32Array(N*N);
+  fft2d(re, im, N);
+
+  // Apply circular low-pass mask
+  const cx = N/2, cy = N/2;
+  const reS = fftshift(re, N), imS = fftshift(im, N);
+  for (let y=0;y<N;y++) {
+    for (let x=0;x<N;x++) {
+      const dist = Math.sqrt((x-cx)**2+(y-cy)**2);
+      const mask = dist <= cutoff ? 1 : 0;
+      reS[y*N+x]*=mask; imS[y*N+x]*=mask;
+    }
+  }
+  const reBack = fftshift(reS, N), imBack = fftshift(imS, N); // ifftshift = fftshift again for even N
+  ifft2d(reBack, imBack, N);
+
+  // Scale back to W×H
+  const out = resize(reBack, N, N, W, H);
+  return out;
+}
+
+// PSNR
+function psnr(a, b) {
+  let mse = 0;
+  for (let i=0;i<a.length;i++) mse += (a[i]-b[i])**2;
+  mse /= a.length;
+  if (mse === 0) return 99;
+  return 10 * Math.log10(255**2 / mse);
+}
+
+// Precomputed PSNR curve
+let psnrCurve = null;
+function buildPsnrCurve(sigma) {
+  const pts = [];
+  for (let fc = 5; fc <= 120; fc += 5) {
+    const out = denoise(sigma, fc);
+    pts.push({ fc, p: psnr(clean, out) });
+  }
+  psnrCurve = pts;
+}
+
+// ─── Rendering helpers ────────────────────────────────────────────────────────
+function drawFFTCircle(canvas, cutoff) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  ctx.fillStyle = '#030810';
+  ctx.fillRect(0,0,cw,ch);
+
+  // Draw radial gradient for magnitude spectrum visualization
+  const cx = cw/2, cy = ch/2;
+  const maxR = Math.min(cw,ch)*0.48;
+
+  // Background magnitude falloff
+  const gradient = ctx.createRadialGradient(cx,cy,0,cx,cy,maxR);
+  gradient.addColorStop(0,'rgba(0,212,255,0.9)');
+  gradient.addColorStop(0.15,'rgba(0,212,255,0.5)');
+  gradient.addColorStop(0.4,'rgba(0,100,200,0.2)');
+  gradient.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0,0,cw,ch);
+
+  // Cross spikes (typical FFT artifact of rectangular shapes)
+  const spikeG = ctx.createLinearGradient(0,cy,cw,cy);
+  spikeG.addColorStop(0,'transparent');
+  spikeG.addColorStop(0.4,'rgba(0,212,255,0.15)');
+  spikeG.addColorStop(0.5,'rgba(0,212,255,0.6)');
+  spikeG.addColorStop(0.6,'rgba(0,212,255,0.15)');
+  spikeG.addColorStop(1,'transparent');
+  ctx.fillStyle = spikeG;
+  ctx.fillRect(0, cy-3, cw, 6);
+
+  const spikeV = ctx.createLinearGradient(cx,0,cx,ch);
+  spikeV.addColorStop(0,'transparent');
+  spikeV.addColorStop(0.4,'rgba(0,212,255,0.15)');
+  spikeV.addColorStop(0.5,'rgba(0,212,255,0.6)');
+  spikeV.addColorStop(0.6,'rgba(0,212,255,0.15)');
+  spikeV.addColorStop(1,'transparent');
+  ctx.fillStyle = spikeV;
+  ctx.fillRect(cx-3, 0, 6, ch);
+
+  // Noise halo
+  ctx.save();
+  for (let i=0;i<6;i++) {
+    const r2 = maxR*(0.3+i*0.12);
+    ctx.beginPath();
+    ctx.arc(cx,cy,r2,0,Math.PI*2);
+    ctx.strokeStyle = `rgba(0,150,255,${0.06-i*0.008})`;
+    ctx.lineWidth = 8;
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Filter boundary circle
+  const fr = (cutoff / 120) * maxR;
+  // Dimmed region outside
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0,0,cw,ch);
+  ctx.arc(cx,cy,fr,0,Math.PI*2,true);
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fill();
+  ctx.restore();
+
+  // Cutoff ring
+  ctx.beginPath();
+  ctx.arc(cx,cy,fr,0,Math.PI*2);
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4,4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Glow ring
+  ctx.beginPath();
+  ctx.arc(cx,cy,fr,0,Math.PI*2);
+  ctx.strokeStyle = 'rgba(0,212,255,0.25)';
+  ctx.lineWidth = 12;
+  ctx.stroke();
+
+  // Label
+  ctx.fillStyle = 'rgba(0,212,255,0.9)';
+  ctx.font = '11px Share Tech Mono, monospace';
+  ctx.fillText(`fc = ${cutoff}`, cx+fr*0.7, cy-8);
+}
+
+function drawImage(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  const id = ctx.createImageData(W, H);
+  for (let i=0; i<W*H; i++) {
+    const v = Math.min(255, Math.max(0, Math.round(data[i])));
+    id.data[i*4]   = v;
+    id.data[i*4+1] = v;
+    id.data[i*4+2] = v;
+    id.data[i*4+3] = 255;
+  }
+  // Scale to canvas
+  const offscreen = document.createElement('canvas');
+  offscreen.width = W; offscreen.height = H;
+  offscreen.getContext('2d').putImageData(id, 0, 0);
+  ctx.fillStyle = '#030810';
+  ctx.fillRect(0,0,cw,ch);
+  const scale = Math.min(cw/W, ch/H);
+  const dx = (cw - W*scale)/2, dy = (ch - H*scale)/2;
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(offscreen, dx, dy, W*scale, H*scale);
+
+  // Scan-line overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.04)';
+  for (let y=0;y<ch;y+=2) ctx.fillRect(0,y,cw,1);
+}
+
+function drawPsnrCurve(canvas, currentCutoff, sigma) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.width, ch = canvas.height;
+  ctx.fillStyle = '#030810';
+  ctx.fillRect(0,0,cw,ch);
+
+  if (!psnrCurve) return;
+
+  const pad = { l:40, r:20, t:20, b:40 };
+  const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+
+  const psnrVals = psnrCurve.map(p => p.p);
+  const minP = Math.min(...psnrVals) - 1;
+  const maxP = Math.max(...psnrVals) + 1;
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(26,45,69,0.8)'; ctx.lineWidth = 1;
+  for (let i=0;i<=4;i++) {
+    const y = pad.t + ph - (i/4)*ph;
+    ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+pw,y); ctx.stroke();
+    const val = (minP + (i/4)*(maxP-minP)).toFixed(1);
+    ctx.fillStyle = '#4a6070'; ctx.font='10px Share Tech Mono,monospace';
+    ctx.fillText(val, 2, y+4);
+  }
+
+  const toX = fc => pad.l + (fc-5)/115 * pw;
+  const toY = p => pad.t + ph - (p-minP)/(maxP-minP)*ph;
+
+  // Area fill
+  ctx.beginPath();
+  ctx.moveTo(toX(psnrCurve[0].fc), toY(psnrCurve[0].p));
+  psnrCurve.forEach(pt => ctx.lineTo(toX(pt.fc), toY(pt.p)));
+  ctx.lineTo(toX(psnrCurve[psnrCurve.length-1].fc), toY(minP));
+  ctx.lineTo(toX(psnrCurve[0].fc), toY(minP));
+  ctx.closePath();
+  const areaGrad = ctx.createLinearGradient(0,pad.t,0,pad.t+ph);
+  areaGrad.addColorStop(0,'rgba(255,107,53,0.3)');
+  areaGrad.addColorStop(1,'rgba(255,107,53,0)');
+  ctx.fillStyle = areaGrad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(toX(psnrCurve[0].fc), toY(psnrCurve[0].p));
+  psnrCurve.forEach(pt => ctx.lineTo(toX(pt.fc), toY(pt.p)));
+  ctx.strokeStyle = '#ff6b35'; ctx.lineWidth = 2; ctx.stroke();
+
+  // Optimal point
+  const best = psnrCurve.reduce((a,b) => b.p>a.p?b:a);
+  ctx.beginPath();
+  ctx.arc(toX(best.fc), toY(best.p), 5, 0, Math.PI*2);
+  ctx.fillStyle = '#ff6b35'; ctx.fill();
+  ctx.fillStyle = '#ff6b35'; ctx.font = '10px Share Tech Mono,monospace';
+  ctx.fillText(`BEST fc=${best.fc}`, toX(best.fc)+8, toY(best.p)-4);
+
+  // Current cutoff marker
+  const curP = psnrCurve.reduce((a,b) => Math.abs(b.fc-currentCutoff)<Math.abs(a.fc-currentCutoff)?b:a).p;
+  const cx2 = toX(currentCutoff), cy2 = toY(curP);
+  ctx.beginPath();
+  ctx.moveTo(cx2, pad.t); ctx.lineTo(cx2, pad.t+ph);
+  ctx.strokeStyle = 'rgba(0,212,255,0.4)'; ctx.lineWidth = 1;
+  ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(cx2, cy2, 6, 0, Math.PI*2);
+  ctx.fillStyle = '#00d4ff'; ctx.fill();
+
+  // Axes
+  ctx.strokeStyle = '#1a2d45'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
+
+  // X axis label
+  ctx.fillStyle = '#4a6070'; ctx.font = '10px Share Tech Mono,monospace';
+  for (let fc of [20,40,60,80,100,120]) {
+    ctx.fillText(fc, toX(fc)-8, pad.t+ph+14);
+  }
+  ctx.fillStyle = '#4a6070';
+  ctx.fillText('CUTOFF FREQ →', pad.l + pw/2 - 40, ch-4);
+}
+
+function drawProfile(canvas, cutoff) {
+  const ctx = canvas.getContext('2d');
+  const cw = canvas.offsetWidth || canvas.width;
+  canvas.width = cw;
+  const ch = canvas.height;
+  ctx.fillStyle = 'var(--panel, #0b1220)';
+  ctx.fillRect(0,0,cw,ch);
+
+  const pad = {l:40, r:20, t:10, b:25};
+  const pw = cw - pad.l - pad.r, ph = ch - pad.t - pad.b;
+
+  // Draw ideal filter response (brick wall)
+  const maxFreq = 120;
+  const toX = f => pad.l + (f/maxFreq)*pw;
+  const toY = v => pad.t + ph - v*ph;
+
+  // Signal spectrum (simulated falloff)
+  ctx.beginPath();
+  for (let f=0;f<=maxFreq;f++) {
+    const mag = Math.max(0, 1 - (f/maxFreq)**1.5) * 0.7 + 0.3 * Math.max(0,1-(f/30)**2);
+    if (f===0) ctx.moveTo(toX(f), toY(mag)); else ctx.lineTo(toX(f), toY(mag));
+  }
+  ctx.lineTo(toX(maxFreq), toY(0)); ctx.lineTo(toX(0), toY(0)); ctx.closePath();
+  const sigGrad = ctx.createLinearGradient(0,0,pw,0);
+  sigGrad.addColorStop(0,'rgba(57,255,20,0.25)'); sigGrad.addColorStop(1,'rgba(57,255,20,0.02)');
+  ctx.fillStyle = sigGrad; ctx.fill();
+
+  // Noise spectrum (flat-ish)
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(0.15));
+  for (let f=0;f<=maxFreq;f++) {
+    const noise = 0.1 + 0.08 * Math.sin(f*0.4);
+    ctx.lineTo(toX(f), toY(noise));
+  }
+  ctx.lineTo(toX(maxFreq), toY(0)); ctx.lineTo(toX(0), toY(0)); ctx.closePath();
+  ctx.fillStyle = 'rgba(255,100,50,0.12)'; ctx.fill();
+
+  // Filter response
+  const fc = cutoff;
+  ctx.beginPath();
+  ctx.moveTo(toX(0), toY(1));
+  ctx.lineTo(toX(fc), toY(1));
+  // Smooth rolloff
+  for (let f=fc; f<=Math.min(fc+15,maxFreq); f++) {
+    const t = (f-fc)/15;
+    const v = 1 - 3*t*t + 2*t*t*t; // smooth step down
+    ctx.lineTo(toX(f), toY(v));
+  }
+  ctx.lineTo(toX(maxFreq), toY(0));
+  ctx.strokeStyle = '#00d4ff'; ctx.lineWidth = 2; ctx.stroke();
+
+  // Vertical cutoff line
+  ctx.beginPath(); ctx.moveTo(toX(fc), pad.t); ctx.lineTo(toX(fc), pad.t+ph);
+  ctx.strokeStyle = 'rgba(0,212,255,0.6)'; ctx.lineWidth = 1;
+  ctx.setLineDash([4,3]); ctx.stroke(); ctx.setLineDash([]);
+
+  ctx.fillStyle = 'rgba(0,212,255,0.8)';
+  ctx.font = '10px Share Tech Mono,monospace';
+  ctx.fillText(`fc=${fc}`, toX(fc)+4, pad.t+12);
+
+  // Legend
+  ctx.font = '10px Share Tech Mono,monospace';
+  ctx.fillStyle = 'rgba(57,255,20,0.8)'; ctx.fillText('█ SIGNAL', pad.l+2, ch-6);
+  ctx.fillStyle = 'rgba(255,100,50,0.8)'; ctx.fillText('█ NOISE', pad.l+75, ch-6);
+  ctx.fillStyle = 'rgba(0,212,255,0.8)'; ctx.fillText('— FILTER', pad.l+148, ch-6);
+
+  // Axis
+  ctx.strokeStyle = '#1a2d45'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
+}
+
+// ─── Preset cards ─────────────────────────────────────────────────────────────
+const presets = [
+  { fc: 15, psnr: 20.5, desc: 'Heavy blur. Most noise removed but fine structure lost. Bright central halo.' },
+  { fc: 30, psnr: 22.6, desc: 'Moderate filtering. Structure returning, some noise remains visible.' },
+  { fc: 50, psnr: 23.3, desc: 'Optimal tradeoff. Max PSNR — signal preserved, noise suppressed.' },
+  { fc: 80, psnr: 22.0, desc: 'Wide passband. Most detail preserved but noise bleeds back in.' },
+];
+
+function buildInfoStrip() {
+  const strip = document.getElementById('infoStrip');
+  strip.innerHTML = '';
+  presets.forEach((p, i) => {
+    const card = document.createElement('div');
+    card.className = 'info-card';
+    card.id = `preset-${i}`;
+    card.innerHTML = `
+      <div class="dot-indicator"></div>
+      <div class="info-cutoff">${p.fc} <small>Hz</small></div>
+      <div class="info-psnr">PSNR <strong>${p.psnr} dB</strong></div>
+      <div class="info-desc">${p.desc}</div>
+    `;
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => {
+      document.getElementById('cutoffSlider').value = p.fc;
+      updateAll(p.fc);
+    });
+    strip.appendChild(card);
+  });
+}
+
+// ─── Main update ──────────────────────────────────────────────────────────────
+let currentCutoff = 50;
+function updateAll(fcVal) {
+  const sigma = +document.getElementById('noiseSlider').value;
+  document.getElementById('noiseVal').textContent = sigma;
+
+  if (fcVal !== null) {
+    currentCutoff = +fcVal;
+    document.getElementById('cutoffVal').textContent = currentCutoff;
+  }
+
+  // Update slider gradient
+  const slider = document.getElementById('cutoffSlider');
+  const pct = ((slider.value - slider.min) / (slider.max - slider.min) * 100).toFixed(1)+'%';
+  slider.style.setProperty('--pct', pct);
+  const nSlider = document.getElementById('noiseSlider');
+  const nPct = ((nSlider.value - nSlider.min) / (nSlider.max - nSlider.min) * 100).toFixed(1)+'%';
+  nSlider.style.setProperty('--pct', nPct);
+
+  const denoised = denoise(sigma, currentCutoff);
+  const p = psnr(clean, denoised);
+
+  // PSNR display
+  document.getElementById('psnrDisplay').innerHTML = `${p.toFixed(1)} <span>dB</span>`;
+  const fillPct = Math.min(100, Math.max(0, (p - 18) / 8 * 100));
+  const fill = document.getElementById('psnrFill');
+  fill.style.width = fillPct + '%';
+  const hue = Math.round(fillPct * 1.2);
+  fill.style.background = `hsl(${hue},100%,55%)`;
+
+  // Draw visuals
+  drawFFTCircle(document.getElementById('fftCanvas'), currentCutoff);
+  drawImage(document.getElementById('imgCanvas'), denoised);
+
+  // Build PSNR curve if sigma changed
+  if (!psnrCurve || cachedSigma !== sigma) {
+    buildPsnrCurve(sigma);
+  }
+  drawPsnrCurve(document.getElementById('psnrCanvas'), currentCutoff, sigma);
+  drawProfile(document.getElementById('profileCanvas'), currentCutoff);
+
+  // Highlight active preset
+  presets.forEach((p2, i) => {
+    const card = document.getElementById(`preset-${i}`);
+    if (card) card.classList.toggle('active', Math.abs(p2.fc - currentCutoff) < 8);
+  });
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+buildInfoStrip();
+updateAll(50);
+</script>
+</body>
+</html>

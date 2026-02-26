@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Filter Mask Visualizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0d1420;
+    --panel: #111927;
+    --border: #1e3048;
+    --accent: #00e5ff;
+    --accent2: #ff6b35;
+    --accent3: #7fff6b;
+    --text: #c8d8e8;
+    --muted: #4a6480;
+    --ideal: #00e5ff;
+    --gaussian: #a78bfa;
+    --butterworth: #ff6b35;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Barlow', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.012) 2px, rgba(0,229,255,0.012) 4px);
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  header {
+    padding: 28px 40px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 20px;
+    position: relative;
+  }
+  header::after {
+    content: '';
+    position: absolute;
+    bottom: -1px; left: 0;
+    width: 220px; height: 1px;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+  }
+
+  .logo {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+    letter-spacing: -0.5px;
+  }
+  h1 span { color: var(--accent); }
+
+  .main {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 80px);
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .section-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  /* Filter type selector */
+  .filter-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .filter-tab {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 10px 14px;
+    color: var(--muted);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.18s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .filter-tab .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .filter-tab[data-filter="ideal"] .dot { background: var(--ideal); }
+  .filter-tab[data-filter="gaussian"] .dot { background: var(--gaussian); }
+  .filter-tab[data-filter="butterworth"] .dot { background: var(--butterworth); }
+
+  .filter-tab:hover { border-color: var(--muted); color: var(--text); }
+  .filter-tab.active[data-filter="ideal"] { border-color: var(--ideal); color: var(--ideal); background: rgba(0,229,255,0.06); }
+  .filter-tab.active[data-filter="gaussian"] { border-color: var(--gaussian); color: var(--gaussian); background: rgba(167,139,250,0.06); }
+  .filter-tab.active[data-filter="butterworth"] { border-color: var(--butterworth); color: var(--butterworth); background: rgba(255,107,53,0.06); }
+
+  /* Sliders */
+  .slider-group { display: flex; flex-direction: column; gap: 16px; }
+  .slider-row { display: flex; flex-direction: column; gap: 8px; }
+  .slider-header { display: flex; justify-content: space-between; align-items: center; }
+  .slider-name { font-size: 12px; color: var(--text); font-weight: 400; }
+  .slider-val {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    min-width: 38px;
+    text-align: right;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    cursor: pointer;
+    transition: transform 0.1s;
+  }
+  input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+  input[type=range].order-slider::-webkit-slider-thumb { background: var(--butterworth); box-shadow: 0 0 8px var(--butterworth); }
+
+  .order-row { transition: opacity 0.2s; }
+  .order-row.hidden { opacity: 0.2; pointer-events: none; }
+
+  /* Mode toggle */
+  .mode-toggle { display: flex; gap: 6px; }
+  .mode-btn {
+    flex: 1;
+    background: none;
+    border: 1px solid var(--border);
+    padding: 7px 0;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+  }
+  .mode-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(0,229,255,0.07); }
+
+  /* Info box */
+  .info-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--accent);
+    padding: 14px;
+    font-size: 11.5px;
+    line-height: 1.7;
+    color: #7a99b8;
+    border-radius: 2px;
+    transition: border-color 0.3s;
+  }
+  .info-box strong { color: var(--text); font-weight: 600; }
+
+  /* ── CONTENT ── */
+  .content {
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .canvas-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+  }
+
+  .canvas-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .canvas-card-header {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .canvas-card-title {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .canvas-card canvas { display: block; width: 100%; aspect-ratio: 1; image-rendering: pixelated; }
+
+  /* Profile chart */
+  .profile-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .profile-card canvas { display: block; width: 100%; }
+
+  /* Formula */
+  .formula-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .formula-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px 16px;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .formula-card.active-ideal { border-color: var(--ideal); background: rgba(0,229,255,0.04); }
+  .formula-card.active-gaussian { border-color: var(--gaussian); background: rgba(167,139,250,0.04); }
+  .formula-card.active-butterworth { border-color: var(--butterworth); background: rgba(255,107,53,0.04); }
+
+  .formula-name {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    margin-bottom: 8px;
+  }
+  .formula-name.ideal { color: var(--ideal); }
+  .formula-name.gaussian { color: var(--gaussian); }
+  .formula-name.butterworth { color: var(--butterworth); }
+
+  .formula-eq {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: #c8d8e8;
+    line-height: 1.8;
+  }
+  .formula-eq .frac {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    vertical-align: middle;
+    font-size: 10px;
+    line-height: 1.3;
+    margin: 0 2px;
+  }
+  .formula-eq .frac-num { border-bottom: 1px solid currentColor; padding-bottom: 1px; }
+
+  /* Frequency heatmap legend */
+  .legend {
+    display: flex; gap: 6px; align-items: center;
+    font-family: 'Share Tech Mono', monospace; font-size: 9px; color: var(--muted);
+  }
+  .legend-grad {
+    width: 60px; height: 7px; border-radius: 2px;
+    background: linear-gradient(to right, #000, #fff);
+    border: 1px solid var(--border);
+  }
+
+  /* Animated glow on active card */
+  @keyframes cardGlow {
+    from { box-shadow: 0 0 0px transparent; }
+    to { box-shadow: 0 0 18px rgba(0,229,255,0.15); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">FFT / Freq Domain</div>
+  <h1>Filter Mask <span>Visualizer</span></h1>
+</header>
+
+<div class="main">
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+
+    <div>
+      <div class="section-label">Filter Type</div>
+      <div class="filter-tabs">
+        <button class="filter-tab active" data-filter="ideal">
+          <span class="dot"></span> Ideal (Hard)
+        </button>
+        <button class="filter-tab" data-filter="gaussian">
+          <span class="dot"></span> Gaussian (Soft)
+        </button>
+        <button class="filter-tab" data-filter="butterworth">
+          <span class="dot"></span> Butterworth
+        </button>
+      </div>
+    </div>
+
+    <div>
+      <div class="section-label">Pass Mode</div>
+      <div class="mode-toggle">
+        <button class="mode-btn active" data-mode="low">LOW PASS</button>
+        <button class="mode-btn" data-mode="high">HIGH PASS</button>
+        <button class="mode-btn" data-mode="band">BAND</button>
+      </div>
+    </div>
+
+    <div class="slider-group">
+      <div class="section-label">Parameters</div>
+      <div class="slider-row">
+        <div class="slider-header">
+          <span class="slider-name">Cutoff Frequency D₀</span>
+          <span class="slider-val" id="valCutoff">64</span>
+        </div>
+        <input type="range" id="sliderCutoff" min="5" max="120" value="64">
+      </div>
+
+      <div class="slider-row order-row" id="orderRow">
+        <div class="slider-header">
+          <span class="slider-name">Order <em>n</em> (Butterworth)</span>
+          <span class="slider-val" id="valOrder">2</span>
+        </div>
+        <input type="range" id="sliderOrder" min="1" max="10" value="2" class="order-slider">
+      </div>
+
+      <div class="slider-row" id="bandWidthRow" style="display:none">
+        <div class="slider-header">
+          <span class="slider-name">Band Width W</span>
+          <span class="slider-val" id="valBandWidth">20</span>
+        </div>
+        <input type="range" id="sliderBandWidth" min="5" max="60" value="20">
+      </div>
+    </div>
+
+    <div class="info-box" id="infoBox">
+      <strong>Ideal Low-Pass Filter</strong><br>
+      Keeps all frequencies within D₀ unchanged (mask = 1) and completely blocks everything outside (mask = 0). Creates sharp ringing artifacts (Gibbs phenomenon) in spatial domain.
+    </div>
+
+  </aside>
+
+  <!-- ── CONTENT ── -->
+  <main class="content">
+
+    <div class="canvas-row">
+      <div class="canvas-card">
+        <div class="canvas-card-header">
+          <span class="canvas-card-title">2D Mask H(u,v)</span>
+          <div class="legend">
+            <span>0</span>
+            <div class="legend-grad"></div>
+            <span>1</span>
+          </div>
+        </div>
+        <canvas id="maskCanvas" width="256" height="256"></canvas>
+      </div>
+
+      <div class="canvas-card">
+        <div class="canvas-card-header">
+          <span class="canvas-card-title">Frequency Spectrum (Log)</span>
+        </div>
+        <canvas id="spectrumCanvas" width="256" height="256"></canvas>
+      </div>
+
+      <div class="canvas-card">
+        <div class="canvas-card-header">
+          <span class="canvas-card-title">Filtered Spectrum</span>
+        </div>
+        <canvas id="filteredCanvas" width="256" height="256"></canvas>
+      </div>
+    </div>
+
+    <div class="profile-card">
+      <div class="canvas-card-header">
+        <span class="canvas-card-title">Radial Profile H(D) — Cross-Section at Center Row</span>
+      </div>
+      <canvas id="profileCanvas" width="900" height="130"></canvas>
+    </div>
+
+    <div class="formula-row">
+      <div class="formula-card" id="fcIdeal">
+        <div class="formula-name ideal">IDEAL</div>
+        <div class="formula-eq">
+          H(u,v) = 1,  if D(u,v) ≤ D₀<br>
+          H(u,v) = 0,  if D(u,v) &gt; D₀
+        </div>
+      </div>
+      <div class="formula-card" id="fcGaussian">
+        <div class="formula-name gaussian">GAUSSIAN</div>
+        <div class="formula-eq">
+          H(u,v) = e<sup>−D²(u,v) / 2D₀²</sup>
+        </div>
+      </div>
+      <div class="formula-card" id="fcButterworth">
+        <div class="formula-name butterworth">BUTTERWORTH</div>
+        <div class="formula-eq">
+          H(u,v) = 1 / [1 + (D/D₀)<sup>2n</sup>]
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ── State ──
+let state = {
+  filter: 'ideal',
+  mode: 'low',
+  cutoff: 64,
+  order: 2,
+  bandWidth: 20
+};
+
+const N = 256; // canvas size
+
+// ── DOM refs ──
+const maskCanvas    = document.getElementById('maskCanvas');
+const spectrumCanvas= document.getElementById('spectrumCanvas');
+const filteredCanvas= document.getElementById('filteredCanvas');
+const profileCanvas = document.getElementById('profileCanvas');
+const sliderCutoff  = document.getElementById('sliderCutoff');
+const sliderOrder   = document.getElementById('sliderOrder');
+const sliderBandWidth = document.getElementById('sliderBandWidth');
+const valCutoff     = document.getElementById('valCutoff');
+const valOrder      = document.getElementById('valOrder');
+const valBandWidth  = document.getElementById('valBandWidth');
+const orderRow      = document.getElementById('orderRow');
+const bandWidthRow  = document.getElementById('bandWidthRow');
+const infoBox       = document.getElementById('infoBox');
+
+// ── Filter math ──
+function getH(D, D0, order) {
+  const n = state.order;
+  const mode = state.mode;
+  const w = state.bandWidth;
+
+  let h;
+  if (state.filter === 'ideal') {
+    if (mode === 'low')  h = D <= D0 ? 1 : 0;
+    else if (mode === 'high') h = D >= D0 ? 1 : 0;
+    else h = (D >= D0 - w/2 && D <= D0 + w/2) ? 1 : 0;
+  } else if (state.filter === 'gaussian') {
+    if (mode === 'low')  h = Math.exp(-(D*D)/(2*D0*D0));
+    else if (mode === 'high') h = 1 - Math.exp(-(D*D)/(2*D0*D0));
+    else {
+      const hLP  = Math.exp(-Math.pow(D - D0, 2) / (2*(w/2)*(w/2)));
+      h = hLP;
+    }
+  } else { // butterworth
+    if (mode === 'low')  h = 1 / (1 + Math.pow(D / D0, 2*n));
+    else if (mode === 'high') h = 1 / (1 + Math.pow(D0 / (D + 1e-9), 2*n));
+    else {
+      const ratio = D === 0 ? 1e9 : (D*D - D0*D0) / (D * w + 1e-9);
+      h = 1 / (1 + Math.pow(ratio, 2*n));
+    }
+  }
+  return Math.max(0, Math.min(1, h));
+}
+
+// ── Colour maps ──
+function grayToRGB(v) {
+  const b = Math.round(v * 255);
+  return [b, b, b];
+}
+
+function heatmap(v) {
+  // black → blue → cyan → green → yellow → white
+  const stops = [
+    [0,0,0],[0,30,90],[0,120,180],[0,210,255],[100,255,150],[255,255,200],[255,255,255]
+  ];
+  const t = v * (stops.length - 1);
+  const i = Math.floor(t);
+  const f = t - i;
+  const a = stops[Math.min(i, stops.length-1)];
+  const b = stops[Math.min(i+1, stops.length-1)];
+  return a.map((c,j) => Math.round(c + f*(b[j]-c)));
+}
+
+// ── Draw mask ──
+function drawMask() {
+  const ctx = maskCanvas.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const cx = N/2, cy = N/2;
+  const D0 = state.cutoff;
+
+  // Colour accent per filter
+  const tint = {ideal:[0,229,255], gaussian:[167,139,250], butterworth:[255,107,53]}[state.filter];
+
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = x - cx, dy = y - cy;
+      const D = Math.sqrt(dx*dx + dy*dy);
+      const h = getH(D, D0, state.order);
+      const idx = (y * N + x) * 4;
+      // blend: dark base + tint * h
+      img.data[idx]   = Math.round(tint[0] * h * 0.85 + 5);
+      img.data[idx+1] = Math.round(tint[1] * h * 0.85 + 5);
+      img.data[idx+2] = Math.round(tint[2] * h * 0.85 + 20);
+      img.data[idx+3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Draw cutoff circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, D0, 0, Math.PI*2);
+  const col = {ideal:'rgba(0,229,255,0.8)', gaussian:'rgba(167,139,250,0.8)', butterworth:'rgba(255,107,53,0.8)'}[state.filter];
+  ctx.strokeStyle = col;
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([4, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ── Generate synthetic freq spectrum of a "natural image" ──
+function makeSpectrum() {
+  const data = new Float32Array(N*N);
+  const cx = N/2, cy = N/2;
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = x-cx+0.5, dy = y-cy+0.5;
+      const D = Math.sqrt(dx*dx+dy*dy);
+      // 1/f power spectrum + noise
+      const r = Math.random();
+      const val = (D < 1 ? 1 : 1/(D*0.3 + 0.01)) + 0.02*r;
+      data[y*N+x] = val;
+    }
+  }
+  return data;
+}
+const spectrum = makeSpectrum();
+
+// ── Draw spectrum ──
+function drawSpectrum(canvas, applyFilter) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const cx = N/2, cy = N/2;
+  const D0 = state.cutoff;
+
+  let maxV = 0;
+  const logSpec = new Float32Array(N*N);
+  for (let i = 0; i < N*N; i++) {
+    const y = Math.floor(i/N), x = i%N;
+    const dx = x-cx+0.5, dy = y-cy+0.5;
+    const D = Math.sqrt(dx*dx+dy*dy);
+    const h = applyFilter ? getH(D, D0, state.order) : 1;
+    logSpec[i] = Math.log(1 + spectrum[i] * h * 255);
+    if (logSpec[i] > maxV) maxV = logSpec[i];
+  }
+  for (let i = 0; i < N*N; i++) {
+    const v = logSpec[i] / maxV;
+    const [r,g,b] = heatmap(v);
+    img.data[i*4]   = r;
+    img.data[i*4+1] = g;
+    img.data[i*4+2] = b;
+    img.data[i*4+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+
+  if (applyFilter) {
+    // subtle cutoff ring
+    ctx.beginPath();
+    ctx.arc(cx, cy, D0, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
+// ── Draw radial profile ──
+function drawProfile() {
+  const ctx = profileCanvas.getContext('2d');
+  const W = profileCanvas.width;
+  const H = profileCanvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  ctx.fillStyle = '#0d1420';
+  ctx.fillRect(0, 0, W, H);
+
+  const pad = {l:36, r:16, t:14, b:28};
+  const pw = W - pad.l - pad.r;
+  const ph = H - pad.t - pad.b;
+  const D0 = state.cutoff;
+  const maxD = 130;
+
+  // Grid
+  ctx.strokeStyle = '#1e3048';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.t + ph - (i/4)*ph;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
+    ctx.fillStyle = '#3a5470';
+    ctx.font = '9px Share Tech Mono';
+    ctx.textAlign = 'right';
+    ctx.fillText((i/4).toFixed(2), pad.l - 5, y + 3);
+  }
+  for (let d = 0; d <= maxD; d += 20) {
+    const x = pad.l + (d/maxD)*pw;
+    ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t+ph); ctx.stroke();
+    ctx.fillStyle = '#3a5470';
+    ctx.font = '9px Share Tech Mono';
+    ctx.textAlign = 'center';
+    ctx.fillText(d, x, pad.t+ph+14);
+  }
+  ctx.fillStyle = '#3a5470';
+  ctx.font = '9px Share Tech Mono';
+  ctx.textAlign = 'center';
+  ctx.fillText('D(u,v) — Radial Distance from Center', pad.l + pw/2, H - 4);
+
+  // D0 vertical line
+  const x0 = pad.l + (D0/maxD)*pw;
+  ctx.beginPath(); ctx.moveTo(x0, pad.t); ctx.lineTo(x0, pad.t+ph);
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+  ctx.setLineDash([4,3]); ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '9px Share Tech Mono'; ctx.textAlign = 'center';
+  ctx.fillText('D₀', x0, pad.t - 3);
+
+  // Draw all three filters lightly
+  const others = ['ideal','gaussian','butterworth'].filter(f => f !== state.filter);
+  const otherColors = {ideal:'rgba(0,229,255,0.15)', gaussian:'rgba(167,139,250,0.15)', butterworth:'rgba(255,107,53,0.15)'};
+  const activeColors = {ideal:'rgba(0,229,255,1)', gaussian:'rgba(167,139,250,1)', butterworth:'rgba(255,107,53,1)'};
+
+  function drawFilterLine(filter, alpha) {
+    ctx.beginPath();
+    const savedFilter = state.filter;
+    state.filter = filter;
+    for (let d = 0; d <= maxD; d += 0.5) {
+      const h = getH(d, D0, state.order);
+      const x = pad.l + (d/maxD)*pw;
+      const y = pad.t + ph - h*ph;
+      d === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    state.filter = savedFilter;
+    ctx.strokeStyle = alpha;
+    ctx.lineWidth = alpha === otherColors[filter] ? 1 : 2.5;
+    ctx.stroke();
+
+    // Glow for active
+    if (filter === state.filter) {
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = activeColors[filter];
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  others.forEach(f => drawFilterLine(f, otherColors[f]));
+  drawFilterLine(state.filter, activeColors[state.filter]);
+
+  // H=1, H=0 labels
+  ctx.fillStyle = '#3a5470'; ctx.font = '9px Share Tech Mono'; ctx.textAlign = 'right';
+  ctx.fillText('H=1', pad.l-5, pad.t+4);
+  ctx.fillText('H=0', pad.l-5, pad.t+ph+4);
+}
+
+// ── Update info box ──
+const INFO = {
+  ideal: {
+    low:  '<strong>Ideal Low-Pass</strong><br>Keeps D ≤ D₀ (mask=1), blocks D > D₀ (mask=0). Hard cutoff creates <em>ringing</em> (Gibbs phenomenon) in spatial domain.',
+    high: '<strong>Ideal High-Pass</strong><br>Blocks D ≤ D₀, passes D > D₀. Extracts edges & fine detail; background is zeroed. Severe ringing artifact.',
+    band: '<strong>Ideal Band-Pass</strong><br>Passes frequencies in a ring around D₀ ± W/2. Used to isolate periodic patterns or specific frequency bands.'
+  },
+  gaussian: {
+    low:  '<strong>Gaussian Low-Pass</strong><br>Smooth roll-off: H = e<sup>−D²/2D₀²</sup>. No ringing. Wider D₀ → less blur. The smoothest possible filter.',
+    high: '<strong>Gaussian High-Pass</strong><br>H = 1 − G<sub>LP</sub>. Gradual edge enhancement. Naturally tapers — avoids harsh artifacts.',
+    band: '<strong>Gaussian Band-Pass</strong><br>Gaussian ring centred at D₀ with spread W. Ideal for isolating textural frequencies without ringing.'
+  },
+  butterworth: {
+    low:  '<strong>Butterworth Low-Pass</strong><br>H = 1/[1+(D/D₀)²ⁿ]. Order n controls steepness. n=1 is gentle; n→∞ approaches ideal. Tuneable ringing trade-off.',
+    high: '<strong>Butterworth High-Pass</strong><br>Inverted low-pass. Higher n → sharper cutoff for edge detection. n=2 is a common practical choice.',
+    band: '<strong>Butterworth Band-Pass</strong><br>Based on band-reject geometry. Order n tunes sharpness of the ring boundary. Very controllable.'
+  }
+};
+
+function updateInfo() {
+  infoBox.innerHTML = INFO[state.filter][state.mode];
+}
+
+function updateFormulas() {
+  document.getElementById('fcIdeal').className = 'formula-card' + (state.filter==='ideal' ? ' active-ideal' : '');
+  document.getElementById('fcGaussian').className = 'formula-card' + (state.filter==='gaussian' ? ' active-gaussian' : '');
+  document.getElementById('fcButterworth').className = 'formula-card' + (state.filter==='butterworth' ? ' active-butterworth' : '');
+}
+
+// ── Main render ──
+function render() {
+  drawMask();
+  drawSpectrum(spectrumCanvas, false);
+  drawSpectrum(filteredCanvas, true);
+  drawProfile();
+  updateInfo();
+  updateFormulas();
+}
+
+// ── Event listeners ──
+document.querySelectorAll('.filter-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.filter = btn.dataset.filter;
+    orderRow.classList.toggle('hidden', state.filter !== 'butterworth');
+    render();
+  });
+});
+
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.mode = btn.dataset.mode;
+    bandWidthRow.style.display = state.mode === 'band' ? 'flex' : 'none';
+    render();
+  });
+});
+
+sliderCutoff.addEventListener('input', () => {
+  state.cutoff = +sliderCutoff.value;
+  valCutoff.textContent = state.cutoff;
+  render();
+});
+sliderOrder.addEventListener('input', () => {
+  state.order = +sliderOrder.value;
+  valOrder.textContent = state.order;
+  render();
+});
+sliderBandWidth.addEventListener('input', () => {
+  state.bandWidth = +sliderBandWidth.value;
+  valBandWidth.textContent = state.bandWidth;
+  render();
+});
+
+// Initial
+orderRow.classList.add('hidden');
+render();
+</script>
+</body>
+</html>

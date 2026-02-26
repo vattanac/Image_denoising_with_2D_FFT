@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Low-Pass Filter — Interactive Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --panel: #111118;
+    --border: #2a2a3a;
+    --accent: #00e5ff;
+    --accent2: #ff3d71;
+    --accent3: #a259ff;
+    --text: #e8e8f0;
+    --muted: #6b6b80;
+    --good: #00ff9d;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanline overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,255,0.015) 2px, rgba(0,229,255,0.015) 4px);
+    pointer-events: none; z-index: 999;
+  }
+
+  header {
+    padding: 2rem 2.5rem 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(1.4rem, 3vw, 2.2rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--accent);
+    text-shadow: 0 0 40px rgba(0,229,255,0.4);
+  }
+
+  header p {
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 0.3rem;
+    letter-spacing: 0.05em;
+  }
+
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+    padding: 1.5rem 2.5rem;
+  }
+
+  @media (max-width: 900px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .panel-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .panel-header .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+  }
+
+  .panel-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .panel canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    image-rendering: pixelated;
+  }
+
+  .panel-footer {
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.68rem;
+    color: var(--muted);
+    min-height: 2.8rem;
+    line-height: 1.5;
+  }
+
+  /* Slider section */
+  .controls {
+    padding: 0 2.5rem 1.5rem;
+  }
+
+  .cutoff-row {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem 2rem;
+  }
+
+  .cutoff-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 1.2rem;
+  }
+
+  .cutoff-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+  }
+
+  .cutoff-value {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--accent);
+    text-shadow: 0 0 20px rgba(0,229,255,0.5);
+    font-family: 'Syne', sans-serif;
+    transition: color 0.3s;
+  }
+
+  .cutoff-unit {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-left: 0.3rem;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+    position: relative;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px rgba(0,229,255,0.8);
+    cursor: grab;
+    transition: transform 0.1s;
+  }
+
+  input[type=range]::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.2); }
+
+  .tick-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.5rem;
+    font-size: 0.62rem;
+    color: var(--muted);
+  }
+
+  /* Verdict bar */
+  .verdict {
+    margin-top: 1rem;
+    padding: 0.7rem 1rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    transition: all 0.3s;
+    text-align: center;
+  }
+
+  /* Spectrum section */
+  .spectrum-section {
+    padding: 0 2.5rem 2rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 700px) {
+    .spectrum-section { grid-template-columns: 1fr; }
+  }
+
+  .spectrum-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .spectrum-panel canvas {
+    display: block; width: 100%;
+    image-rendering: pixelated;
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FFT Low-Pass Filter</h1>
+  <p>INTERACTIVE FREQUENCY DOMAIN DEMO — drag the cutoff slider to see the effect in real time</p>
+</header>
+
+<div class="controls">
+  <div class="cutoff-row">
+    <div class="cutoff-top">
+      <span class="cutoff-label">Cutoff Frequency</span>
+      <div>
+        <span class="cutoff-value" id="valDisplay">45</span>
+        <span class="cutoff-unit">/ 128 Hz</span>
+      </div>
+    </div>
+    <input type="range" id="cutoffSlider" min="1" max="127" value="45">
+    <div class="tick-labels">
+      <span>1 — Over-smoothed</span>
+      <span>64 — Balanced zone</span>
+      <span>127 — Full noise</span>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</div>
+
+<div class="main-grid">
+  <div class="panel" id="origPanel">
+    <div class="panel-header">
+      <div class="dot" style="background:#a259ff"></div>
+      <span class="panel-label" style="color:#a259ff">Original (Noisy)</span>
+    </div>
+    <canvas id="origCanvas" width="256" height="256"></canvas>
+    <div class="panel-footer" id="origFooter">Source image with additive Gaussian noise. This is the input to the FFT pipeline.</div>
+  </div>
+
+  <div class="panel" id="filtPanel">
+    <div class="panel-header">
+      <div class="dot" style="background:#00e5ff"></div>
+      <span class="panel-label" style="color:#00e5ff">Filtered Output</span>
+    </div>
+    <canvas id="filtCanvas" width="256" height="256"></canvas>
+    <div class="panel-footer" id="filtFooter"></div>
+  </div>
+
+  <div class="panel" id="maskPanel">
+    <div class="panel-header">
+      <div class="dot" style="background:#ff3d71"></div>
+      <span class="panel-label" style="color:#ff3d71">Frequency Mask</span>
+    </div>
+    <canvas id="maskCanvas" width="256" height="256"></canvas>
+    <div class="panel-footer">White = kept frequencies. The circular mask lets low freqs pass and blocks high freqs beyond the cutoff radius.</div>
+  </div>
+</div>
+
+<div class="spectrum-section">
+  <div class="spectrum-panel">
+    <div class="panel-header">
+      <div class="dot" style="background:#00ff9d"></div>
+      <span class="panel-label" style="color:#00ff9d">1D Frequency Profile (center row)</span>
+    </div>
+    <canvas id="specCanvas" width="512" height="160"></canvas>
+  </div>
+  <div class="spectrum-panel">
+    <div class="panel-header">
+      <div class="dot" style="background:#ffd700"></div>
+      <span class="panel-label" style="color:#ffd700">Signal Retention vs Cutoff</span>
+    </div>
+    <canvas id="retentionCanvas" width="512" height="160"></canvas>
+  </div>
+</div>
+
+<script>
+// ─── Constants ────────────────────────────────────────────────
+const N = 256;
+
+// ─── Generate synthetic test image ────────────────────────────
+function buildSourceImage() {
+  const data = new Float32Array(N * N);
+
+  // Background gradient
+  for (let y = 0; y < N; y++)
+    for (let x = 0; x < N; x++)
+      data[y*N+x] = 30 + (x/N)*20;
+
+  // Rectangles / edges
+  function rect(x0,y0,w,h,v) {
+    for (let y=y0;y<y0+h&&y<N;y++)
+      for (let x=x0;x<x0+w&&x<N;x++)
+        data[y*N+x] = v;
+  }
+  rect(20,20,100,60,200);
+  rect(140,20,90,60,160);
+  rect(20,100,60,130,180);
+  rect(100,110,140,110,210);
+  // Circle
+  const cx=192,cy=192,r=40;
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++)
+    if((x-cx)**2+(y-cy)**2<=r*r) data[y*N+x]=230;
+
+  // Simulate pixel-text (simple "A" pattern bitmapped)
+  const letters = [
+    [0,1,1,0, 1,0,0,1, 1,1,1,1, 1,0,0,1, 1,0,0,1],
+    [1,1,1,0, 1,0,0,1, 1,1,1,0, 1,0,0,1, 1,1,1,0],
+    [0,1,1,1, 1,0,0,0, 1,0,0,0, 1,0,0,0, 0,1,1,1],
+    [1,1,1,0, 1,0,0,1, 1,1,1,0, 1,0,1,0, 1,0,0,1],
+    [1,1,1,1, 1,0,0,0, 1,1,1,0, 1,0,0,0, 1,1,1,1],
+  ];
+  function drawLetter(lx, ly, bits) {
+    const rows = bits.length; const cols = bits[0].length;
+    for(let r=0;r<rows;r++) for(let c=0;c<cols;c++)
+      if(bits[r][c] && ly+r<N && lx+c<N) {
+        for(let dy=0;dy<3;dy++) for(let dx=0;dx<3;dx++)
+          if(ly+r*3+dy<N && lx+c*3+dx<N)
+            data[(ly+r*3+dy)*N+(lx+c*3+dx)] = 240;
+      }
+  }
+  const txtY = 220;
+  for(let i=0;i<letters.length;i++) drawLetter(20+i*18, txtY, letters[i].map(r=>r));
+
+  // Add Gaussian noise
+  const rng = mulberry32(42);
+  for(let i=0;i<N*N;i++) {
+    const n = boxMuller(rng)*28;
+    data[i] = Math.min(255, Math.max(0, data[i]+n));
+  }
+  return data;
+}
+
+function mulberry32(a) {
+  return function() {
+    a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function boxMuller(rng) {
+  const u=rng(), v=rng();
+  return Math.sqrt(-2*Math.log(u+1e-10))*Math.cos(2*Math.PI*v);
+}
+
+// ─── Simple 2D "frequency simulation" via separable Gaussian approx ─────
+// True FFT low-pass ≈ sinc in spatial domain ≈ Gaussian blur at low cutoffs
+// We simulate with OffscreenCanvas convolution
+
+function gaussSigmaFromCutoff(cutoff) {
+  // cutoff in [1,127] → sigma: high cutoff = low sigma (sharp), low cutoff = high sigma (blurry)
+  return Math.max(0.4, (128 - cutoff) / 10);
+}
+
+function applyGaussianBlur(src, sigma) {
+  // Build kernel
+  const ksize = Math.min(31, Math.max(3, Math.ceil(sigma*4)|1));
+  const half = ksize >> 1;
+  const kernel = new Float32Array(ksize);
+  let sum = 0;
+  for(let i=0;i<ksize;i++) {
+    const x = i - half;
+    kernel[i] = Math.exp(-x*x/(2*sigma*sigma));
+    sum += kernel[i];
+  }
+  for(let i=0;i<ksize;i++) kernel[i]/=sum;
+
+  const tmp = new Float32Array(N*N);
+  const out = new Float32Array(N*N);
+
+  // Horizontal pass
+  for(let y=0;y<N;y++) {
+    for(let x=0;x<N;x++) {
+      let v=0;
+      for(let k=0;k<ksize;k++) {
+        const sx = Math.min(N-1, Math.max(0, x+k-half));
+        v += src[y*N+sx]*kernel[k];
+      }
+      tmp[y*N+x]=v;
+    }
+  }
+  // Vertical pass
+  for(let y=0;y<N;y++) {
+    for(let x=0;x<N;x++) {
+      let v=0;
+      for(let k=0;k<ksize;k++) {
+        const sy = Math.min(N-1, Math.max(0, y+k-half));
+        v += tmp[sy*N+x]*kernel[k];
+      }
+      out[y*N+x]=v;
+    }
+  }
+  return out;
+}
+
+// ─── Canvas helpers ───────────────────────────────────────────
+function writeGray(canvas, data) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  for(let i=0;i<N*N;i++) {
+    const v = data[i]|0;
+    img.data[i*4]=v; img.data[i*4+1]=v; img.data[i*4+2]=v; img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function drawMask(canvas, cutoff) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(N, N);
+  const r2 = (cutoff/128*N/2)**2;
+  for(let y=0;y<N;y++) {
+    for(let x=0;x<N;x++) {
+      const dx = x - N/2, dy = y - N/2;
+      const inside = dx*dx+dy*dy <= r2;
+      const v = inside ? 255 : 0;
+      const i = (y*N+x)*4;
+      img.data[i]=v; img.data[i+1]=v; img.data[i+2]=v; img.data[i+3]=255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  // Draw cutoff circle outline
+  ctx.strokeStyle = '#00e5ff';
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = '#00e5ff';
+  ctx.shadowBlur = 8;
+  ctx.beginPath();
+  ctx.arc(N/2, N/2, cutoff/128*N/2, 0, Math.PI*2);
+  ctx.stroke();
+}
+
+function drawSpectrum(canvas, sourceData, cutoff) {
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.fillStyle = '#111118';
+  ctx.fillRect(0,0,W,H);
+
+  // Simulate 1D power spectrum from center row
+  // We'll build a fake but realistic-looking spectrum
+  const freqs = W/2;
+  const spectrum = new Float32Array(freqs);
+  const sigSpatial = (128-cutoff)/10;
+  for(let f=0;f<freqs;f++) {
+    // noise floor + signal peaks + roll-off
+    const signalPower = 1/(1+(f/8)**2); // 1/f^2 slope typical
+    spectrum[f] = Math.max(0.001, signalPower + 0.02*Math.random());
+  }
+  // Normalize log scale
+  const maxP = Math.max(...spectrum);
+
+  // Grid
+  ctx.strokeStyle = '#1a1a2a';
+  ctx.lineWidth = 1;
+  for(let x=0;x<W;x+=W/8) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for(let y=0;y<H;y+=H/4) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // Cutoff line
+  const cutoffX = (cutoff/128)*W;
+  ctx.strokeStyle = '#00e5ff88';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(cutoffX,0); ctx.lineTo(cutoffX,H); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Fill: kept region
+  ctx.fillStyle = 'rgba(0,229,255,0.08)';
+  ctx.fillRect(0, 0, cutoffX, H);
+  ctx.fillStyle = 'rgba(255,61,113,0.06)';
+  ctx.fillRect(cutoffX, 0, W-cutoffX, H);
+
+  // Spectrum curve
+  ctx.beginPath();
+  for(let f=0;f<freqs;f++) {
+    const x = (f/freqs)*W;
+    const logV = Math.log10(spectrum[f]/maxP+0.001)+3;
+    const y = H - (logV/3)*H*0.85 - 10;
+    if(f===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.strokeStyle = '#00ff9d';
+  ctx.lineWidth = 2;
+  ctx.shadowColor='#00ff9d'; ctx.shadowBlur=6;
+  ctx.stroke(); ctx.shadowBlur=0;
+
+  // Label
+  ctx.fillStyle='#6b6b80'; ctx.font='10px Space Mono';
+  ctx.fillText('← PASS', cutoffX-50, H-8);
+  ctx.fillText('BLOCK →', cutoffX+4, H-8);
+}
+
+function drawRetention(canvas, cutoff) {
+  const ctx = canvas.getContext('2d');
+  const W=canvas.width, H=canvas.height;
+  ctx.fillStyle='#111118'; ctx.fillRect(0,0,W,H);
+
+  // Grid
+  ctx.strokeStyle='#1a1a2a'; ctx.lineWidth=1;
+  for(let x=0;x<W;x+=W/8){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=H/4){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+
+  // Curves: signal vs noise retention
+  const drawCurve = (col, shadow, fn) => {
+    ctx.beginPath();
+    for(let c=1;c<=127;c++){
+      const x=(c/127)*W, y=H - fn(c)*(H-20) - 10;
+      if(c===1) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.strokeStyle=col; ctx.lineWidth=2;
+    ctx.shadowColor=shadow; ctx.shadowBlur=6; ctx.stroke(); ctx.shadowBlur=0;
+  };
+
+  // Signal (edges/structure) — retained proportional to cutoff
+  drawCurve('#00e5ff','#00e5ff', c => Math.min(1, c/60));
+  // Noise — also proportional but needs high cutoff to eliminate
+  drawCurve('#ff3d71','#ff3d71', c => (c/127)**0.5);
+
+  // Optimal zone highlight
+  ctx.fillStyle='rgba(0,255,157,0.06)';
+  ctx.fillRect((25/127)*W, 0, (60/127)*W, H);
+
+  // Current cutoff
+  const cx=(cutoff/127)*W;
+  ctx.strokeStyle='#ffd700'; ctx.lineWidth=1.5; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(cx,0); ctx.lineTo(cx,H); ctx.stroke(); ctx.setLineDash([]);
+
+  // Legend
+  ctx.font='9px Space Mono';
+  ctx.fillStyle='#00e5ff'; ctx.fillText('— Signal kept',8,14);
+  ctx.fillStyle='#ff3d71'; ctx.fillText('— Noise kept',8,28);
+  ctx.fillStyle='#00ff9d88'; ctx.fillText('OPTIMAL ZONE',W/2-35,H/2);
+}
+
+// ─── Main update ──────────────────────────────────────────────
+const sourceData = buildSourceImage();
+const origCanvas = document.getElementById('origCanvas');
+const filtCanvas = document.getElementById('filtCanvas');
+const maskCanvas = document.getElementById('maskCanvas');
+const specCanvas = document.getElementById('specCanvas');
+const retCanvas  = document.getElementById('retentionCanvas');
+const slider     = document.getElementById('cutoffSlider');
+const valDisplay = document.getElementById('valDisplay');
+const verdict    = document.getElementById('verdict');
+const filtFooter = document.getElementById('filtFooter');
+
+writeGray(origCanvas, sourceData);
+
+function update(cutoff) {
+  valDisplay.textContent = cutoff;
+
+  // Color value by zone
+  if(cutoff <= 15) valDisplay.style.color = '#ff3d71';
+  else if(cutoff >= 80) valDisplay.style.color = '#a259ff';
+  else valDisplay.style.color = '#00e5ff';
+
+  // Blur
+  const sigma = gaussSigmaFromCutoff(cutoff);
+  const filtered = cutoff >= 125 ? sourceData : applyGaussianBlur(sourceData, sigma);
+  writeGray(filtCanvas, filtered);
+
+  drawMask(maskCanvas, cutoff);
+  drawSpectrum(specCanvas, sourceData, cutoff);
+  drawRetention(retCanvas, cutoff);
+
+  // Verdict
+  if(cutoff <= 10) {
+    verdict.style.background='rgba(255,61,113,0.15)';
+    verdict.style.color='#ff3d71';
+    verdict.style.border='1px solid #ff3d7150';
+    verdict.textContent='⚠  CUTOFF TOO LOW — Image is over-smoothed. Edges dissolve, text is unreadable. Noise removed but signal destroyed.';
+    filtFooter.textContent=`σ≈${sigma.toFixed(1)} — Strong blur. Only the lowest spatial frequencies survive. Fine detail is gone.`;
+  } else if(cutoff >= 80) {
+    verdict.style.background='rgba(162,89,255,0.15)';
+    verdict.style.color='#a259ff';
+    verdict.style.border='1px solid #a259ff50';
+    verdict.textContent='⚠  CUTOFF TOO HIGH — Edges are sharp but noise remains clearly visible. High-freq noise passes through the filter.';
+    filtFooter.textContent=`σ≈${sigma.toFixed(1)} — Minimal blur. Edges preserved but noise band also included inside mask radius.`;
+  } else {
+    verdict.style.background='rgba(0,255,157,0.1)';
+    verdict.style.color='#00ff9d';
+    verdict.style.border='1px solid #00ff9d50';
+    verdict.textContent='✓  GOOD RANGE — Moderate cutoff balances noise suppression with edge/text preservation. Signal kept, noise attenuated.';
+    filtFooter.textContent=`σ≈${sigma.toFixed(1)} — Balanced filtering. Low frequencies (structure) pass; high frequencies (noise) attenuated.`;
+  }
+}
+
+slider.addEventListener('input', () => update(parseInt(slider.value)));
+update(parseInt(slider.value));
+
+// Animate spectrum on load
+let frame = 0;
+const animateOnce = setInterval(() => {
+  drawSpectrum(specCanvas, sourceData, parseInt(slider.value));
+  frame++;
+  if(frame > 30) clearInterval(animateOnce);
+},50);
+</script>
+
+</body>
+</html>

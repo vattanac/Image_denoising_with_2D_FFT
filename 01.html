@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FFT Filter — The Blunt Instrument Problem</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=DM+Sans:wght@300;400;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --border: #1e1e2e;
+    --accent: #e8ff5a;
+    --red: #ff5a5a;
+    --blue: #5ae8ff;
+    --dim: #4a4a6a;
+    --text: #e8e8f0;
+    --muted: #7a7a9a;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    padding: 2rem 1rem;
+    overflow-x: hidden;
+  }
+
+  h1 {
+    font-family: 'Space Mono', monospace;
+    font-size: clamp(1rem, 3vw, 1.4rem);
+    color: var(--accent);
+    letter-spacing: -0.02em;
+    margin-bottom: 0.25rem;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-family: 'Space Mono', monospace;
+    margin-bottom: 2rem;
+  }
+
+  .header {
+    max-width: 960px;
+    margin: 0 auto 2rem;
+    border-left: 3px solid var(--accent);
+    padding-left: 1rem;
+  }
+
+  .stage {
+    max-width: 960px;
+    margin: 0 auto;
+    display: grid;
+    gap: 1.5rem;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .panel-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .panel-label span.tag {
+    font-size: 0.6rem;
+    padding: 0.15rem 0.45rem;
+    border-radius: 2px;
+    font-weight: 700;
+  }
+  .tag.good { background: #1a3a1a; color: #5aff8a; border: 1px solid #2a5a2a; }
+  .tag.bad  { background: #3a1a1a; color: var(--red); border: 1px solid #5a2a2a; }
+  .tag.info { background: #1a2a3a; color: var(--blue); border: 1px solid #2a4a5a; }
+  .tag.warn { background: #3a3a1a; color: var(--accent); border: 1px solid #5a5a2a; }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .explanation {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.25rem;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .explanation h3 {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+    letter-spacing: 0.05em;
+  }
+
+  .explanation p {
+    font-size: 0.82rem;
+    color: var(--muted);
+    line-height: 1.6;
+    margin-bottom: 0.5rem;
+  }
+
+  .explanation p:last-child { margin-bottom: 0; }
+
+  strong { color: var(--text); }
+  .hl-red { color: var(--red); }
+  .hl-blue { color: var(--blue); }
+  .hl-yellow { color: var(--accent); }
+
+  .controls {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .ctrl-group {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+
+  .ctrl-group label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    width: 120px;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+  }
+
+  .val-display {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--accent);
+    min-width: 2.5rem;
+    text-align: right;
+  }
+
+  .freq-diagram {
+    padding: 0.75rem;
+  }
+
+  .arrow-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.3rem 0;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--dim);
+  }
+  .arrow-row .arr { color: var(--accent); font-size: 1.2rem; }
+
+  @media (max-width: 640px) {
+    .row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>FFT Low-Pass Filter — The Blunt Instrument Problem</h1>
+  <div class="subtitle">// a portrait with a noisy face + sharp background</div>
+</div>
+
+<div class="stage">
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="ctrl-group">
+      <label>Noise Level</label>
+      <input type="range" id="noiseSlider" min="0" max="80" value="40">
+      <div class="val-display" id="noiseVal">40</div>
+    </div>
+    <div class="ctrl-group">
+      <label>Filter Radius</label>
+      <input type="range" id="filterSlider" min="2" max="80" value="20">
+      <div class="val-display" id="filterVal">20</div>
+    </div>
+    <div class="ctrl-group" style="margin-left:auto;">
+      <label style="color:var(--accent);">↑ Drag sliders to explore</label>
+    </div>
+  </div>
+
+  <!-- Row 1: Input images -->
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">Original (clean) <span class="tag good">IDEAL</span></div>
+      <canvas id="cOriginal" width="256" height="256"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Noisy Input <span class="tag bad">PROBLEM</span></div>
+      <canvas id="cNoisy" width="256" height="256"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-label">FFT Spectrum (noisy) <span class="tag info">FREQ DOMAIN</span></div>
+      <canvas id="cSpectrum" width="256" height="256"></canvas>
+    </div>
+  </div>
+
+  <!-- Row 2: Filter and output -->
+  <div class="row">
+    <div class="panel">
+      <div class="panel-label">Low-Pass Mask <span class="tag warn">FILTER</span></div>
+      <canvas id="cMask" width="256" height="256"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Filtered Result <span class="tag bad">COLLATERAL DAMAGE</span></div>
+      <canvas id="cFiltered" width="256" height="256"></canvas>
+    </div>
+    <div class="panel">
+      <div class="panel-label">Diff — Lost Detail <span class="tag bad">WHAT WAS ERASED</span></div>
+      <canvas id="cDiff" width="256" height="256"></canvas>
+    </div>
+  </div>
+
+  <!-- Explanation -->
+  <div class="explanation">
+    <h3>// WHY THIS HAPPENS</h3>
+    <p>
+      In the FFT domain, <strong class="hl-yellow">both</strong> the face noise <strong>and</strong> the background's sharp brick/text/edge detail
+      occupy the <strong class="hl-blue">same high-frequency bands</strong>. The filter doesn't know which pixel
+      came from the face and which from the background — it only sees frequency, not location.
+    </p>
+    <p>
+      A low-pass filter <strong>zeros out everything above its cutoff radius</strong> (the bright ring in the mask).
+      This removes face noise ✓ but also kills the <strong class="hl-red">sharp background edges</strong> — they're
+      high-frequency too. The "Diff" panel shows exactly what detail was erased from the background.
+    </p>
+    <p>
+      <strong>The FFT is global</strong> — one mask applies to the entire image equally.
+      Solutions: <span class="hl-yellow">spatial masks</span> (select only the face before filtering),
+      <span class="hl-yellow">wavelet transforms</span> (frequency + position), or modern
+      <span class="hl-yellow">AI denoising</span> that understands semantic regions.
+    </p>
+  </div>
+
+</div>
+
+<script>
+// ── Utilities ─────────────────────────────────────────────────────────────────
+const N = 256;
+
+function getCtx(id) {
+  const c = document.getElementById(id);
+  return c.getContext('2d');
+}
+
+function putPixels(ctx, data) {
+  const id = ctx.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) {
+    id.data[i*4]   = data[i];
+    id.data[i*4+1] = data[i];
+    id.data[i*4+2] = data[i];
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+function putPixelsRGB(ctx, r, g, b) {
+  const id = ctx.createImageData(N, N);
+  for (let i = 0; i < N * N; i++) {
+    id.data[i*4]   = Math.max(0, Math.min(255, r[i]));
+    id.data[i*4+1] = Math.max(0, Math.min(255, g[i]));
+    id.data[i*4+2] = Math.max(0, Math.min(255, b[i]));
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+}
+
+// ── Draw synthetic scene ───────────────────────────────────────────────────────
+function drawScene(ctx, noiseLevel) {
+  ctx.fillStyle = '#1a2a3a'; // background
+  ctx.fillRect(0, 0, N, N);
+
+  // Background: sharp brick-like grid lines
+  ctx.strokeStyle = 'rgba(100,130,160,0.8)';
+  ctx.lineWidth = 1;
+  for (let x = 20; x < N; x += 22) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, N); ctx.stroke();
+  }
+  for (let y = 20; y < N; y += 15) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(N, y); ctx.stroke();
+  }
+
+  // Background text (sharp detail)
+  ctx.font = 'bold 10px Space Mono, monospace';
+  ctx.fillStyle = 'rgba(140,180,210,0.6)';
+  const words = ['CAFÉ','OPEN','EXIT','24H','MENU','SALE','PARK','INFO'];
+  let wi = 0;
+  for (let y = 25; y < N; y += 35) {
+    for (let x = 8; x < N; x += 48) {
+      ctx.fillText(words[wi++ % words.length], x, y);
+    }
+  }
+
+  // Neck
+  ctx.fillStyle = '#c8956a';
+  ctx.fillRect(104, 185, 48, 70);
+
+  // Head (ellipse approximation)
+  ctx.fillStyle = '#d4a070';
+  ctx.beginPath();
+  ctx.ellipse(128, 128, 52, 65, 0, 0, Math.PI*2);
+  ctx.fill();
+
+  // Hair
+  ctx.fillStyle = '#3a2510';
+  ctx.beginPath();
+  ctx.ellipse(128, 78, 52, 38, 0, Math.PI, 2*Math.PI);
+  ctx.fill();
+  ctx.fillRect(76, 70, 14, 40);
+  ctx.fillRect(166, 70, 14, 40);
+
+  // Eyes
+  ctx.fillStyle = '#fff';
+  ctx.beginPath(); ctx.ellipse(110, 122, 9, 6, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(146, 122, 9, 6, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#2a1808';
+  ctx.beginPath(); ctx.arc(110, 122, 4, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(146, 122, 4, 0, Math.PI*2); ctx.fill();
+
+  // Nose
+  ctx.strokeStyle = '#a07050';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(122,130); ctx.lineTo(118,150); ctx.lineTo(124,152); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(134,130); ctx.lineTo(138,150); ctx.lineTo(132,152); ctx.stroke();
+
+  // Mouth
+  ctx.strokeStyle = '#9a4a30';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(110, 165);
+  ctx.quadraticCurveTo(128, 176, 146, 165);
+  ctx.stroke();
+
+  // Shoulder hint
+  ctx.fillStyle = '#5a6a8a';
+  ctx.beginPath();
+  ctx.moveTo(60, 256); ctx.lineTo(60, 215); ctx.lineTo(100, 195);
+  ctx.lineTo(156, 195); ctx.lineTo(196, 215); ctx.lineTo(196, 256); ctx.fill();
+
+  // NOW add noise ONLY to face region
+  if (noiseLevel > 0) {
+    const imgData = ctx.getImageData(0, 0, N, N);
+    const d = imgData.data;
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        // Check if inside face ellipse (roughly)
+        const dx = x - 128, dy = y - 128;
+        if ((dx*dx)/(52*52) + (dy*dy)/(65*65) < 1) {
+          const n = (Math.random() - 0.5) * noiseLevel * 2;
+          const i = (y*N+x)*4;
+          d[i]   = Math.max(0,Math.min(255, d[i]   + n));
+          d[i+1] = Math.max(0,Math.min(255, d[i+1] + n));
+          d[i+2] = Math.max(0,Math.min(255, d[i+2] + n));
+        }
+      }
+    }
+    ctx.putImageData(imgData, 0, 0);
+  }
+}
+
+// ── Grab grayscale from canvas ─────────────────────────────────────────────────
+function canvasToGray(ctx) {
+  const d = ctx.getImageData(0, 0, N, N).data;
+  const g = new Float32Array(N*N);
+  for (let i = 0; i < N*N; i++) g[i] = (d[i*4] + d[i*4+1] + d[i*4+2]) / 3;
+  return g;
+}
+
+function canvasToRGB(ctx) {
+  const d = ctx.getImageData(0, 0, N, N).data;
+  const r = new Float32Array(N*N);
+  const g = new Float32Array(N*N);
+  const b = new Float32Array(N*N);
+  for (let i = 0; i < N*N; i++) {
+    r[i] = d[i*4]; g[i] = d[i*4+1]; b[i] = d[i*4+2];
+  }
+  return {r,g,b};
+}
+
+// ── Simple 2D DFT (row-col separable using 1D) — using Cooley-Tukey ───────────
+// For N=256 this is fast enough (2^8)
+function fft1d(re, im, invert) {
+  const n = re.length;
+  for (let i=1,j=0; i<n; i++) {
+    let bit = n>>1;
+    for (; j&bit; bit>>=1) j^=bit;
+    j^=bit;
+    if (i<j) {
+      [re[i],re[j]]=[re[j],re[i]];
+      [im[i],im[j]]=[im[j],im[i]];
+    }
+  }
+  for (let len=2; len<=n; len<<=1) {
+    const ang = 2*Math.PI/len*(invert?1:-1);
+    const wre=Math.cos(ang), wim=Math.sin(ang);
+    for (let i=0; i<n; i+=len) {
+      let curRe=1, curIm=0;
+      for (let j=0; j<len/2; j++) {
+        const u=re[i+j], v=im[i+j];
+        const xre=re[i+j+len/2]*curRe - im[i+j+len/2]*curIm;
+        const xim=re[i+j+len/2]*curIm + im[i+j+len/2]*curRe;
+        re[i+j]=u+xre; im[i+j]=v+xim;
+        re[i+j+len/2]=u-xre; im[i+j+len/2]=v-xim;
+        const t=curRe*wre-curIm*wim;
+        curIm=curRe*wim+curIm*wre; curRe=t;
+      }
+    }
+  }
+  if (invert) { for(let i=0;i<n;i++){re[i]/=n;im[i]/=n;} }
+}
+
+function fft2d(re2, im2) {
+  const row_re = new Float64Array(N);
+  const row_im = new Float64Array(N);
+  for (let y=0;y<N;y++) {
+    for(let x=0;x<N;x++){row_re[x]=re2[y*N+x];row_im[x]=im2[y*N+x];}
+    fft1d(row_re,row_im,false);
+    for(let x=0;x<N;x++){re2[y*N+x]=row_re[x];im2[y*N+x]=row_im[x];}
+  }
+  const col_re = new Float64Array(N);
+  const col_im = new Float64Array(N);
+  for (let x=0;x<N;x++) {
+    for(let y=0;y<N;y++){col_re[y]=re2[y*N+x];col_im[y]=im2[y*N+x];}
+    fft1d(col_re,col_im,false);
+    for(let y=0;y<N;y++){re2[y*N+x]=col_re[y];im2[y*N+x]=col_im[y];}
+  }
+}
+
+function ifft2d(re2, im2) {
+  const row_re=new Float64Array(N), row_im=new Float64Array(N);
+  for(let y=0;y<N;y++){
+    for(let x=0;x<N;x++){row_re[x]=re2[y*N+x];row_im[x]=im2[y*N+x];}
+    fft1d(row_re,row_im,true);
+    for(let x=0;x<N;x++){re2[y*N+x]=row_re[x];im2[y*N+x]=row_im[x];}
+  }
+  const col_re=new Float64Array(N), col_im=new Float64Array(N);
+  for(let x=0;x<N;x++){
+    for(let y=0;y<N;y++){col_re[y]=re2[y*N+x];col_im[y]=im2[y*N+x];}
+    fft1d(col_re,col_im,true);
+    for(let y=0;y<N;y++){re2[y*N+x]=col_re[y];im2[y*N+x]=col_im[y];}
+  }
+}
+
+// shift so DC is center
+function fftShift(data) {
+  const out = new Float64Array(N*N);
+  const h = N/2;
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++) {
+    const ny=(y+h)%N, nx=(x+h)%N;
+    out[ny*N+nx]=data[y*N+x];
+  }
+  return out;
+}
+
+// ── Main render ────────────────────────────────────────────────────────────────
+let noise=40, filterR=20;
+const offCtx = document.createElement('canvas');
+offCtx.width = offCtx.height = N;
+const off = offCtx.getContext('2d');
+
+const offClean = document.createElement('canvas');
+offClean.width = offClean.height = N;
+const offC = offClean.getContext('2d');
+
+function render() {
+  // Draw clean reference
+  offC.clearRect(0,0,N,N);
+  drawScene(offC, 0);
+  // Draw noisy
+  off.clearRect(0,0,N,N);
+  drawScene(off, noise);
+
+  // Show originals
+  document.getElementById('cOriginal').getContext('2d').drawImage(offClean,0,0);
+  document.getElementById('cNoisy').getContext('2d').drawImage(offCtx,0,0);
+
+  // Get RGB from noisy
+  const {r,g,b} = canvasToRGB(off);
+
+  // FFT each channel
+  function processChannel(ch) {
+    const re = new Float64Array(ch);
+    const im = new Float64Array(N*N);
+    fft2d(re,im);
+    return {re,im};
+  }
+
+  const fR = processChannel(r), fG = processChannel(g), fB = processChannel(b);
+
+  // Show spectrum (magnitude of R channel, shifted, log)
+  const mag = new Float64Array(N*N);
+  const shiftedRe = fftShift(new Float64Array(fR.re));
+  const shiftedIm = fftShift(new Float64Array(fR.im));
+  let mxM=0;
+  for(let i=0;i<N*N;i++){
+    mag[i]=Math.log(1+Math.sqrt(shiftedRe[i]*shiftedRe[i]+shiftedIm[i]*shiftedIm[i]));
+    if(mag[i]>mxM)mxM=mag[i];
+  }
+  const specPx = new Uint8ClampedArray(N*N);
+  for(let i=0;i<N*N;i++) specPx[i]=Math.round(mag[i]/mxM*255);
+  
+  // Draw spectrum with color tint
+  const specCtx=document.getElementById('cSpectrum').getContext('2d');
+  const sid=specCtx.createImageData(N,N);
+  for(let i=0;i<N*N;i++){
+    const v=specPx[i];
+    sid.data[i*4]   = Math.min(255,v*1.2);
+    sid.data[i*4+1] = Math.min(255,v*0.8);
+    sid.data[i*4+2] = Math.min(255,v*0.5+50);
+    sid.data[i*4+3] = 255;
+  }
+  specCtx.putImageData(sid,0,0);
+  // Draw filter circle on spectrum
+  specCtx.strokeStyle='rgba(232,255,90,0.8)';
+  specCtx.lineWidth=1.5;
+  specCtx.setLineDash([4,3]);
+  specCtx.beginPath();
+  specCtx.arc(N/2, N/2, filterR, 0, Math.PI*2);
+  specCtx.stroke();
+  specCtx.setLineDash([]);
+
+  // Build mask (in unshifted coords)
+  const mask = new Float64Array(N*N).fill(1);
+  const cx=N/2, cy=N/2;
+  for(let y=0;y<N;y++) for(let x=0;x<N;x++){
+    // unshifted freq coords
+    const fx = x<N/2?x:x-N;
+    const fy = y<N/2?y:y-N;
+    if(fx*fx+fy*fy > filterR*filterR) mask[y*N+x]=0;
+  }
+
+  // Draw mask (shifted for display)
+  const maskShifted = fftShift(mask);
+  const maskCtx=document.getElementById('cMask').getContext('2d');
+  const mid=maskCtx.createImageData(N,N);
+  for(let i=0;i<N*N;i++){
+    const v=maskShifted[i]*255;
+    mid.data[i*4]=v; mid.data[i*4+1]=v*0.9; mid.data[i*4+2]=0; mid.data[i*4+3]=255;
+  }
+  maskCtx.putImageData(mid,0,0);
+  maskCtx.strokeStyle='rgba(232,255,90,0.8)';
+  maskCtx.lineWidth=1.5;
+  maskCtx.setLineDash([4,3]);
+  maskCtx.beginPath();
+  maskCtx.arc(N/2,N/2,filterR,0,Math.PI*2);
+  maskCtx.stroke();
+  maskCtx.setLineDash([]);
+
+  // Apply mask and IFFT
+  function applyAndReconstruct(fCh) {
+    const re2 = new Float64Array(fCh.re);
+    const im2 = new Float64Array(fCh.im);
+    for(let i=0;i<N*N;i++){re2[i]*=mask[i];im2[i]*=mask[i];}
+    ifft2d(re2,im2);
+    return re2;
+  }
+
+  const outR = applyAndReconstruct(fR);
+  const outG = applyAndReconstruct(fG);
+  const outB = applyAndReconstruct(fB);
+
+  // Draw filtered
+  const filtCtx=document.getElementById('cFiltered').getContext('2d');
+  const fid=filtCtx.createImageData(N,N);
+  for(let i=0;i<N*N;i++){
+    fid.data[i*4]=Math.max(0,Math.min(255,Math.round(outR[i])));
+    fid.data[i*4+1]=Math.max(0,Math.min(255,Math.round(outG[i])));
+    fid.data[i*4+2]=Math.max(0,Math.min(255,Math.round(outB[i])));
+    fid.data[i*4+3]=255;
+  }
+  filtCtx.putImageData(fid,0,0);
+
+  // Diff — show what was lost vs clean (amplified)
+  const {r:cr,g:cg,b:cb}=canvasToRGB(offC);
+  const diffCtx=document.getElementById('cDiff').getContext('2d');
+  const did=diffCtx.createImageData(N,N);
+  for(let i=0;i<N*N;i++){
+    const dr=Math.abs(cr[i]-outR[i])*3;
+    const dg=Math.abs(cg[i]-outG[i])*3;
+    const db=Math.abs(cb[i]-outB[i])*3;
+    did.data[i*4]=Math.min(255,dr*2);
+    did.data[i*4+1]=Math.min(255,dg*0.5);
+    did.data[i*4+2]=Math.min(255,db*0.5+dr*0.3);
+    did.data[i*4+3]=255;
+  }
+  diffCtx.putImageData(did,0,0);
+}
+
+// Initial render
+document.getElementById('noiseSlider').addEventListener('input', function() {
+  noise=+this.value;
+  document.getElementById('noiseVal').textContent=noise;
+  render();
+});
+document.getElementById('filterSlider').addEventListener('input', function() {
+  filterR=+this.value;
+  document.getElementById('filterVal').textContent=filterR;
+  render();
+});
+
+render();
+</script>
+</body>
+</html>
